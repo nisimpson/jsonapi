@@ -1,6 +1,7 @@
 package jsonapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -137,6 +138,52 @@ type Relationship struct {
 type Link struct {
 	Href string                 `json:"href,omitempty"`
 	Meta map[string]interface{} `json:"meta,omitempty"`
+}
+
+func (l Link) MarshalJSON() ([]byte, error) {
+	// If the link has no href, it's a null link
+	if l.Href == "" {
+		return []byte("null"), nil
+	}
+
+	// If there is no meta, return only the link.
+	if len(l.Meta) == 0 {
+		return json.Marshal(l.Href)
+	}
+
+	// Otherwise, marshal the link as a map
+	return json.Marshal(map[string]interface{}{
+		"href": l.Href,
+		"meta": l.Meta,
+	})
+}
+
+func (l *Link) UnmarshalJSON(data []byte) error {
+	// Check if it's null first
+	if string(data) == "null" {
+		l.Href = ""
+		l.Meta = nil
+		return nil
+	}
+
+	// Try to unmarshal as a map
+	if bytes.HasPrefix(data, []byte("{")) {
+		var link struct {
+			Href string                 `json:"href"`
+			Meta map[string]interface{} `json:"meta"`
+		}
+
+		err := json.Unmarshal(data, &link)
+
+		l.Href = link.Href
+		l.Meta = link.Meta
+
+		return err
+	}
+
+	// Try to unmarshal as string
+	l.Meta = nil
+	return json.Unmarshal(data, &l.Href)
 }
 
 // Error represents a JSON:API error object.

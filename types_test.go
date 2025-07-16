@@ -164,7 +164,7 @@ func TestPrimaryData_JSON(t *testing.T) {
 
 	t.Run("unmarshal single resource", func(t *testing.T) {
 		jsonData := `{"id":"1","type":"users","attributes":{"name":"John"}}`
-		
+
 		var data PrimaryData
 		err := json.Unmarshal([]byte(jsonData), &data)
 		require.NoError(t, err)
@@ -179,7 +179,7 @@ func TestPrimaryData_JSON(t *testing.T) {
 
 	t.Run("unmarshal multiple resources", func(t *testing.T) {
 		jsonData := `[{"id":"1","type":"users"},{"id":"2","type":"users"}]`
-		
+
 		var data PrimaryData
 		err := json.Unmarshal([]byte(jsonData), &data)
 		require.NoError(t, err)
@@ -194,7 +194,7 @@ func TestPrimaryData_JSON(t *testing.T) {
 
 	t.Run("unmarshal null resource", func(t *testing.T) {
 		jsonData := `null`
-		
+
 		var data PrimaryData
 		err := json.Unmarshal([]byte(jsonData), &data)
 		require.NoError(t, err)
@@ -233,7 +233,7 @@ func TestDocument_Structure(t *testing.T) {
 	assert.Equal(t, doc.Meta, unmarshaled.Meta)
 	assert.Equal(t, doc.Links, unmarshaled.Links)
 	assert.Len(t, unmarshaled.Included, 1)
-	
+
 	resource, ok := unmarshaled.Data.One()
 	assert.True(t, ok)
 	assert.Equal(t, "1", resource.ID)
@@ -282,6 +282,13 @@ func TestLink_Structure(t *testing.T) {
 
 	assert.Equal(t, link.Href, unmarshaled.Href)
 	assert.Equal(t, float64(10), unmarshaled.Meta["count"]) // JSON numbers are float64
+
+	jsonData = []byte("null")
+	err = json.Unmarshal(jsonData, &unmarshaled)
+	require.NoError(t, err)
+
+	assert.Equal(t, "", unmarshaled.Href)
+	assert.Len(t, unmarshaled.Meta, 0)
 }
 
 func TestRelationship_Structure(t *testing.T) {
@@ -307,7 +314,7 @@ func TestRelationship_Structure(t *testing.T) {
 
 	assert.Equal(t, float64(2), unmarshaled.Meta["count"]) // JSON numbers are float64
 	assert.Equal(t, rel.Links, unmarshaled.Links)
-	
+
 	resources, ok := unmarshaled.Data.Many()
 	assert.True(t, ok)
 	assert.Len(t, resources, 2)

@@ -11,7 +11,30 @@ import (
 // MarshalOptions contains options for marshaling operations.
 type MarshalOptions struct {
 	marshaler      func(interface{}) ([]byte, error)
+	modifyDocument []func(*Document)
 	includeRelated bool
+}
+
+// DocumentMeta returns a function that modifies MarshalOptions to add metadata to the JSON:API document.
+// The provided meta map will be set as the top-level meta object in the resulting document.
+// This is useful for adding custom metadata like pagination info or document-level statistics.
+func DocumentMeta(meta map[string]interface{}) func(*MarshalOptions) {
+	return func(mo *MarshalOptions) {
+		mo.modifyDocument = append(mo.modifyDocument, func(d *Document) {
+			d.Meta = meta
+		})
+	}
+}
+
+// DocumentLinks returns a function that modifies MarshalOptions to add links to the JSON:API document.
+// The provided links map will be set as the top-level links object in the resulting document.
+// This can be used to add pagination, self-referential, or related resource links to the document.
+func DocumentLinks(links map[string]Link) func(*MarshalOptions) {
+	return func(mo *MarshalOptions) {
+		mo.modifyDocument = append(mo.modifyDocument, func(d *Document) {
+			d.Links = links
+		})
+	}
 }
 
 // WithMarshaler uses a custom JSON marshaler to serialize documents.
@@ -82,6 +105,10 @@ func MarshalDocument(ctx context.Context, out interface{}, opts ...func(*Marshal
 	doc, err := marshalToDocument(ctx, out, options)
 	if err != nil {
 		return nil, err
+	}
+
+	for _, mod := range options.modifyDocument {
+		mod(doc)
 	}
 
 	return doc, nil
