@@ -374,6 +374,128 @@ func getUserHandler(w http.ResponseWriter, r *http.Request) {
 // Implement other handlers similarly
 ```
 
+### Using server.Response and server.HandlerFunc
+
+The library provides a more convenient way to write JSON:API handlers using `server.HandlerFunc` and `server.Response`:
+
+```go
+package main
+
+import (
+    "net/http"
+    
+    "github.com/nisimpson/jsonapi"
+    "github.com/nisimpson/jsonapi/server"
+)
+
+func main() {
+    // Create resource handlers using HandlerFunc
+    usersHandler := server.ResourceHandler{
+        Get:    server.HandlerFunc(getUser),
+        Create: server.HandlerFunc(createUser),
+        Search: server.HandlerFunc(searchUsers),
+    }
+    
+    // Create a resource handler mux
+    mux := server.ResourceHandlerMux{
+        "users": usersHandler,
+    }
+    
+    // Create a default handler with standard JSON:API routes
+    handler := server.DefaultHandler(mux)
+    
+    // Start the server
+    http.ListenAndServe(":8080", handler)
+}
+
+// Using HandlerFunc for cleaner handler implementation
+func getUser(ctx *server.RequestContext, r *http.Request) (server.Response, error) {
+    // Get the user by ID
+    user, err := fetchUserFromDatabase(ctx.ResourceID)
+    if err != nil {
+        return server.Response{}, err // Error will be automatically formatted as JSON:API error
+    }
+    
+    // Marshal the user to JSON:API
+    doc, err := jsonapi.MarshalDocument(r.Context(), user)
+    if err != nil {
+        return server.Response{}, err
+    }
+    
+    // Return a structured response
+    return server.Response{
+        Status: http.StatusOK,
+        Header: http.Header{
+            "Cache-Control": []string{"max-age=3600"},
+        },
+        Body: doc,
+    }, nil
+}
+
+// Example of handling errors with HandlerFunc
+func createUser(ctx *server.RequestContext, r *http.Request) (server.Response, error) {
+    var user User
+    
+    // Parse request body
+    doc, err := jsonapi.UnmarshalDocument(r.Body)
+    if err != nil {
+        // Return a custom JSON:API error
+        return server.Response{}, jsonapi.Error{
+            Status: "400",
+            Title:  "Invalid request body",
+            Detail: "The request body could not be parsed as a valid JSON:API document",
+        }
+    }
+    
+    // Unmarshal document into user struct
+    if err := jsonapi.UnmarshalResourceInto(r.Context(), doc.Data, &user); err != nil {
+        return server.Response{}, err
+    }
+    
+    // Save user to database
+    if err := saveUserToDatabase(&user); err != nil {
+        return server.Response{}, err
+    }
+    
+    // Marshal the created user to JSON:API
+    responseDoc, err := jsonapi.MarshalDocument(r.Context(), user)
+    if err != nil {
+        return server.Response{}, err
+    }
+    
+    // Return a structured response with 201 Created status
+    return server.Response{
+        Status: http.StatusCreated,
+        Header: http.Header{
+            "Location": []string{"/users/" + user.ID},
+        },
+        Body: responseDoc,
+    }, nil
+}
+```
+
+The `server.HandlerFunc` type provides several advantages:
+
+1. Automatic access to the parsed request context
+2. Structured response handling with status codes and headers
+3. Automatic error handling with proper JSON:API error formatting
+4. Cleaner handler implementation with less boilerplate code
+
+The `server.Response` struct allows you to specify:
+- HTTP status code
+- Custom HTTP headers
+- JSON:API document body
+
+The `server.Write` and `server.Error` functions are also available for more direct control over response writing:
+
+```go
+// Write a JSON:API document response
+server.Write(w, doc, http.StatusOK)
+
+// Write a JSON:API error response
+server.Error(w, err, http.StatusBadRequest)
+```
+
 ## Request Parameter Parsing
 
 The `RequestContext` provides methods for parsing JSON:API query parameters:
