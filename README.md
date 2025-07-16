@@ -18,6 +18,9 @@ A comprehensive Go library for marshaling Go structs into JSON:API compliant res
 - ✅ HTTP server utilities for JSON:API endpoints
 - ✅ Request parameter parsing (sparse fieldsets, includes, sorting, pagination, filtering)
 - ✅ Content negotiation and proper header handling
+- ✅ Resource and relationship handlers for HTTP servers
+- ✅ Default HTTP routing for JSON:API endpoints
+- ✅ Iterator support for resource collections
 - ✅ 100% test coverage with comprehensive edge case validation
 
 ## Installation
@@ -26,607 +29,410 @@ A comprehensive Go library for marshaling Go structs into JSON:API compliant res
 go get github.com/nisimpson/jsonapi
 ```
 
-## Quick Start
+## Basic Usage
 
-### Marshaling (Go → JSON:API)
+### Marshaling
 
 ```go
 package main
 
 import (
+    "context"
     "encoding/json"
     "fmt"
+    
     "github.com/nisimpson/jsonapi"
 )
 
+// Define a struct with jsonapi tags
 type User struct {
     ID    string `jsonapi:"primary,users"`
     Name  string `jsonapi:"attr,name"`
-    Email string `jsonapi:"attr,email"`
+    Email string `jsonapi:"attr,email,omitempty"`
 }
 
 func main() {
     user := User{
-        ID:    "1",
+        ID:    "123",
         Name:  "John Doe",
         Email: "john@example.com",
     }
-
+    
+    // Marshal to JSON:API
     data, err := jsonapi.Marshal(user)
     if err != nil {
         panic(err)
     }
-
+    
     fmt.Println(string(data))
+    // Output:
+    // {"data":{"id":"123","type":"users","attributes":{"email":"john@example.com","name":"John Doe"}}}
 }
 ```
 
-Output:
-```json
-{
-  "data": {
-    "type": "users",
-    "id": "1",
-    "attributes": {
-      "name": "John Doe",
-      "email": "john@example.com"
-    }
-  }
-}
-```
-
-### Unmarshaling (JSON:API → Go)
+### Unmarshaling
 
 ```go
 package main
 
 import (
+    "context"
     "fmt"
+    
     "github.com/nisimpson/jsonapi"
 )
 
+// Define a struct with jsonapi tags
 type User struct {
     ID    string `jsonapi:"primary,users"`
-    Name  string `jsonapi:"attr,name"`
-    Email string `jsonapi:"attr,email"`
-}
-
-func main() {
-    jsonData := `{
-      "data": {
-        "type": "users",
-        "id": "1",
-        "attributes": {
-          "name": "John Doe",
-          "email": "john@example.com"
-        }
-      }
-    }`
-
-    var user User
-    err := jsonapi.Unmarshal([]byte(jsonData), &user)
-    if err != nil {
-        panic(err)
-    }
-
-    fmt.Printf("User: %+v\n", user)
-    // Output: User: {ID:1 Name:John Doe Email:john@example.com}
-}
-```
-
-## Core Types
-
-### Document
-The top-level JSON:API document structure containing data, meta, links, errors, and included resources.
-
-### Resource
-Represents a JSON:API resource object with ID, type, attributes, relationships, links, and meta.
-
-### PrimaryData
-Represents the primary data which can be a single resource, multiple resources, or null.
-
-### Relationship
-Represents a JSON:API relationship object with data, links, and meta.
-
-## Struct Tags
-
-Use the `jsonapi` struct tag to define how fields should be marshaled:
-
-### Primary Key
-```go
-type User struct {
-    ID string `jsonapi:"primary,users"`
-}
-```
-
-### Attributes
-```go
-type User struct {
     Name  string `jsonapi:"attr,name"`
     Email string `jsonapi:"attr,email,omitempty"`
 }
-```
 
-### Relationships
-```go
-type User struct {
-    Posts []Post `jsonapi:"relation,posts"`
+func main() {
+    jsonData := []byte(`{
+        "data": {
+            "id": "123",
+            "type": "users",
+            "attributes": {
+                "name": "John Doe",
+                "email": "john@example.com"
+            }
+        }
+    }`)
+    
+    var user User
+    err := jsonapi.Unmarshal(jsonData, &user)
+    if err != nil {
+        panic(err)
+    }
+    
+    fmt.Printf("User: %s (%s)\n", user.Name, user.Email)
+    // Output:
+    // User: John Doe (john@example.com)
 }
 ```
 
-## Advanced Usage
+## Struct Tags
 
-### Relationships with Included Resources
+The library uses struct tags to determine how to marshal and unmarshal JSON:API resources:
 
 ```go
 type User struct {
-    ID    string `jsonapi:"primary,users"`
-    Name  string `jsonapi:"attr,name"`
-    Posts []Post `jsonapi:"relation,posts"`
+    ID       string `jsonapi:"primary,users"`        // Primary resource ID and type
+    Name     string `jsonapi:"attr,name"`            // Attribute
+    Email    string `jsonapi:"attr,email,omitempty"` // Optional attribute
+    Posts    []Post `jsonapi:"relation,posts"`       // To-many relationship
+    Profile  Profile `jsonapi:"relation,profile"`    // To-one relationship
+    Metadata string `jsonapi:"-"`                    // Ignored field
+}
+```
+
+### Tag Format
+
+- `primary,type`: Marks a field as the primary ID field and specifies the resource type
+- `attr,name[,omitempty]`: Marks a field as an attribute with optional omitempty flag
+- `relation,name[,omitempty]`: Marks a field as a relationship with optional omitempty flag
+- `-`: Ignores the field during marshaling/unmarshaling
+
+## Relationships
+
+The library supports both to-one and to-many relationships:
+
+```go
+type User struct {
+    ID      string `jsonapi:"primary,users"`
+    Name    string `jsonapi:"attr,name"`
+    Profile Profile `jsonapi:"relation,profile"` // To-one relationship
+    Posts   []Post  `jsonapi:"relation,posts"`   // To-many relationship
+}
+
+type Profile struct {
+    ID       string `jsonapi:"primary,profiles"`
+    Bio      string `jsonapi:"attr,bio"`
+    UserID   string `jsonapi:"attr,user_id"`
 }
 
 type Post struct {
-    ID    string `jsonapi:"primary,posts"`
-    Title string `jsonapi:"attr,title"`
+    ID      string `jsonapi:"primary,posts"`
+    Title   string `jsonapi:"attr,title"`
+    Content string `jsonapi:"attr,content"`
+    UserID  string `jsonapi:"attr,user_id"`
 }
+```
 
-user := User{
-    ID:   "1",
-    Name: "John Doe",
-    Posts: []Post{
-        {ID: "1", Title: "First Post"},
-        {ID: "2", Title: "Second Post"},
-    },
-}
+### Including Related Resources
 
+You can include related resources in the response:
+
+```go
+// Marshal with included related resources
 data, err := jsonapi.Marshal(user, jsonapi.IncludeRelatedResources())
 ```
 
-### Embedded Structs
+## Custom Marshaling/Unmarshaling
+
+The library supports custom marshaling and unmarshaling through interfaces:
 
 ```go
-type Timestamp struct {
-    CreatedAt time.Time `jsonapi:"attr,created_at"`
-    UpdatedAt time.Time `jsonapi:"attr,updated_at"`
+// Custom resource marshaling
+type ResourceMarshaler interface {
+    MarshalJSONAPIResource(ctx context.Context) (Resource, error)
 }
 
-type User struct {
-    Timestamp  // Embedded struct
-    ID   string `jsonapi:"primary,users"`
-    Name string `jsonapi:"attr,name"`
+// Custom resource unmarshaling
+type ResourceUnmarshaler interface {
+    UnmarshalJSONAPIResource(ctx context.Context, resource Resource) error
 }
 ```
 
-### Custom Marshaling
-
-Implement the `ResourceMarshaler` interface for custom resource marshaling:
+Other interfaces are available for more granular control:
 
 ```go
-type User struct {
-    ID   string
-    Name string
+// Marshaling interfaces
+type LinksMarshaler interface {
+    MarshalJSONAPILinks(ctx context.Context) (map[string]Link, error)
 }
 
-func (u User) MarshalJSONAPIResource(ctx context.Context) (jsonapi.Resource, error) {
-    return jsonapi.Resource{
-        Type: "users",
-        ID:   u.ID,
-        Attributes: map[string]interface{}{
-            "name": u.Name,
-            "custom_field": "custom_value",
-        },
-    }, nil
+type MetaMarshaler interface {
+    MarshalJSONAPIMeta(ctx context.Context) (map[string]interface{}, error)
+}
+
+type RelationshipLinksMarshaler interface {
+    MarshalJSONAPIRelationshipLinks(ctx context.Context, name string) (map[string]Link, error)
+}
+
+type RelationshipMetaMarshaler interface {
+    MarshalJSONAPIRelationshipMeta(ctx context.Context, name string) (map[string]interface{}, error)
+}
+
+// Unmarshaling interfaces
+type LinksUnmarshaler interface {
+    UnmarshalJSONAPILinks(ctx context.Context, links map[string]Link) error
+}
+
+type MetaUnmarshaler interface {
+    UnmarshalJSONAPIMeta(ctx context.Context, meta map[string]interface{}) error
+}
+
+type RelationshipLinksUnmarshaler interface {
+    UnmarshalJSONAPIRelationshipLinks(ctx context.Context, name string, links map[string]Link) error
+}
+
+type RelationshipMetaUnmarshaler interface {
+    UnmarshalJSONAPIRelationshipMeta(ctx context.Context, name string, meta map[string]interface{}) error
 }
 ```
 
-### Custom Links and Meta
+## Iterator Support
+
+The library provides iterator support for resource collections using Go's `iter` package:
 
 ```go
-func (u User) MarshalJSONAPILinks(ctx context.Context) (map[string]jsonapi.Link, error) {
-    return map[string]jsonapi.Link{
-        "self": {Href: "/users/" + u.ID},
-    }, nil
-}
-
-func (u User) MarshalJSONAPIMeta(ctx context.Context) (map[string]interface{}, error) {
-    return map[string]interface{}{
-        "version": "1.0",
-    }, nil
-}
-```
-
-## Document Manipulation
-
-### MarshalDocument
-
-For cases where you need to access or modify the Document structure before serialization, you can use the MarshalDocument function:
-
-```go
-// Get the Document structure for further manipulation
-doc, err := jsonapi.MarshalDocument(context.Background(), user)
+// Get a document with multiple resources
+doc, err := jsonapi.MarshalDocument(context.Background(), users)
 if err != nil {
     panic(err)
 }
 
-// Add custom meta information
-doc.Meta = map[string]interface{}{
-    "version": "1.0",
+// Iterate over resources in the primary data
+for resource := range doc.Data.Iter() {
+    fmt.Printf("Resource ID: %s, Type: %s\n", resource.ID, resource.Type)
+    
+    // Process attributes
+    for name, value := range resource.Attributes {
+        fmt.Printf("Attribute %s: %v\n", name, value)
+    }
+    
+    // Process relationships
+    for name, rel := range resource.Relationships {
+        fmt.Printf("Relationship %s\n", name)
+    }
+}
+```
+
+This makes it easy to process large collections of resources efficiently without having to manually check if the primary data contains a single resource or multiple resources.
+
+## HTTP Server Support
+
+The library includes a `server` package that provides HTTP server utilities for building JSON:API compliant web services. It includes request context management, resource handlers, and routing utilities that simplify the creation of JSON:API endpoints following the specification.
+
+### Resource Handlers
+
+The `ResourceHandler` type provides HTTP handlers for different JSON:API resource operations:
+
+```go
+type ResourceHandler struct {
+    Get          http.Handler // Handler for GET requests to retrieve a single resource
+    Create       http.Handler // Handler for POST requests to create new resources
+    Update       http.Handler // Handler for PATCH requests to update existing resources
+    Delete       http.Handler // Handler for DELETE requests to remove resources
+    Search       http.Handler // Handler for GET requests to search/list resources
+    Relationship http.Handler // Handler for relationship-specific operations
+}
+```
+
+### Relationship Handlers
+
+The `RelationshipHandler` type provides HTTP handlers for JSON:API relationship operations:
+
+```go
+type RelationshipHandler struct {
+    Get    http.Handler // Handler for GET requests to fetch relationship linkage
+    Add    http.Handler // Handler for POST requests to add to to-many relationships
+    Update http.Handler // Handler for PATCH requests to update relationship linkage
+    Delete http.Handler // Handler for DELETE requests to remove from to-many relationships
+}
+```
+
+### Default HTTP Routing
+
+The `DefaultHandler` function creates a default HTTP handler with standard JSON:API routes configured:
+
+```go
+func DefaultHandler(mux ResourceHandlerMux) http.Handler {
+    // Sets up all the conventional JSON:API endpoints including:
+    // - "GET    /{type}"                                   // Search/list resources of a type
+    // - "GET    /{type}/{id}"                              // Get a single resource by ID
+    // - "POST   /{type}"                                   // Create a new resource
+    // - "PATCH  /{type}/{id}"                              // Update an existing resource
+    // - "DELETE /{type}/{id}"                              // Delete a resource
+    // - "GET    /{type}/{id}/relationships/{relationship}" // Get a resource's relationship
+    // - "GET    /{type}/{id}/{related}"                    // Get related resources
+    // - "POST   /{type}/{id}/relationships/{relationship}" // Add to a to-many relationship
+    // - "PATCH  /{type}/{id}/relationships/{relationship}" // Update a relationship
+    // - "DELETE /{type}/{id}/relationships/{relationship}" // Remove from a to-many relationship
+}
+```
+
+### Request Context
+
+The `RequestContext` type contains parsed information from an HTTP request that is relevant to JSON:API resource operations:
+
+```go
+type RequestContext struct {
+    ResourceID            string // The ID of the requested resource
+    ResourceType          string // The type of the requested resource
+    Relationship          string // The name of the requested relationship
+    FetchRelatedResources bool   // Whether to fetch related resources instead of relationship linkage
+}
+```
+
+### Example Server Setup
+
+```go
+package main
+
+import (
+    "net/http"
+    
+    "github.com/nisimpson/jsonapi"
+    "github.com/nisimpson/jsonapi/server"
+)
+
+func main() {
+    // Create resource handlers
+    usersHandler := server.ResourceHandler{
+        Get: http.HandlerFunc(getUserHandler),
+        Create: http.HandlerFunc(createUserHandler),
+        Search: http.HandlerFunc(searchUsersHandler),
+        // Add other handlers as needed
+    }
+    
+    // Create a resource handler mux
+    mux := server.ResourceHandlerMux{
+        "users": usersHandler,
+        // Add other resource types as needed
+    }
+    
+    // Create a default handler with standard JSON:API routes
+    handler := server.DefaultHandler(mux)
+    
+    // Start the server
+    http.ListenAndServe(":8080", handler)
 }
 
-// Then marshal the document
-data, err = json.MarshalIndent(doc, "", "  ")
-fmt.Println(string(data))
-```
-
-This is particularly useful when you need to:
-- Add top-level meta information
-- Customize the included resources
-- Add top-level links
-- Inspect the document structure before serialization
-
-## Marshaling Options
-
-### WithMarshaler
-Use a custom JSON marshaler:
-
-```go
-data, err := jsonapi.Marshal(user, jsonapi.WithMarshaler(func(out interface{}) ([]byte, error) {
-    return json.MarshalIndent(out, "", "  ")
-}))
-```
-
-### IncludeRelatedResources
-Include related resources in the `included` array:
-
-```go
-data, err := jsonapi.Marshal(user, jsonapi.IncludeRelatedResources())
-```
-
-## Unmarshaling Options
-
-### WithUnmarshaler
-Use a custom JSON unmarshaler:
-
-```go
-err := jsonapi.Unmarshal(data, &user, jsonapi.WithUnmarshaler(func(data []byte, out interface{}) error {
-    return json.Unmarshal(data, out)
-}))
-```
-
-### StrictMode
-Enable strict validation during unmarshaling:
-
-```go
-err := jsonapi.Unmarshal(data, &user, jsonapi.StrictMode())
-```
-
-### PopulateFromIncluded
-Populate relationship fields from included resources:
-
-```go
-err := jsonapi.Unmarshal(data, &user, jsonapi.PopulateFromIncluded())
-```
-
-## Context Support
-
-All marshaling and unmarshaling operations support Go contexts:
-
-```go
-ctx := context.WithTimeout(context.Background(), 5*time.Second)
-data, err := jsonapi.MarshalWithContext(ctx, user)
-```
-
-```go
-ctx := context.WithTimeout(context.Background(), 5*time.Second)
-err := jsonapi.UnmarshalWithContext(ctx, data, &user)
-```
-
-## Server Package
-
-The server package provides comprehensive utilities for building JSON:API compliant HTTP handlers with automatic request processing and response generation.
-
-### Key Components
-
-- **RequestContext**: Extracts and validates JSON:API request parameters
-- **ResourceHandler**: Interface for handling resource CRUD operations
-- **ResourceHandlerMux**: HTTP multiplexer for routing requests by resource type
-- **RelationshipHandler**: Interface for handling relationship operations
-- **Response utilities**: Functions for writing JSON:API compliant responses
-
-### Request Parameter Parsing
-
-The server package automatically parses JSON:API query parameters:
-
-```go
-import "github.com/nisimpson/jsonapi/server"
-
-func handleUsers(w http.ResponseWriter, r *http.Request) {
-    ctx, err := server.NewRequestContext(r)
+func getUserHandler(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    requestContext, _ := server.GetRequestContext(ctx)
+    
+    // Get the user by ID
+    user := getUser(requestContext.ResourceID)
+    
+    // Marshal the user to JSON:API
+    doc, err := jsonapi.MarshalDocument(ctx, user)
     if err != nil {
-        server.WriteError(w, jsonapi.Error{
-            Status: "400",
-            Title:  "Bad Request",
-            Detail: err.Error(),
-        })
+        http.Error(w, err.Error(), http.StatusInternalServerError)
         return
     }
-
-    // Sparse fieldsets: ?fields[users]=name,email
-    userFields := ctx.GetFields("users")
     
-    // Includes: ?include=posts,comments
-    if ctx.ShouldInclude("posts") {
-        // Include related posts
-    }
-    
-    // Sorting: ?sort=name,-created_at
-    sortFields := ctx.Sort
-    
-    // Pagination: ?page[number]=1&page[size]=10
-    pageNumber := ctx.GetPageParam("number")
-    pageSize := ctx.GetPageParam("size")
-    
-    // Filtering: ?filter[status]=active
-    statusFilter := ctx.GetFilterParam("status")
-    
-    // Process request and return response
-    users := getUsersWithParams(userFields, statusFilter, pageNumber, pageSize)
-    server.WriteResponse(w, users, http.StatusOK)
+    // Write the response
+    w.Header().Set("Content-Type", "application/vnd.api+json")
+    json.NewEncoder(w).Encode(doc)
 }
+
+// Implement other handlers similarly
 ```
 
-### Resource Handler Interface
+## Request Parameter Parsing
 
-Implement the ResourceHandler interface for complete CRUD operations:
+The `RequestContext` provides methods for parsing JSON:API query parameters:
+
+### Sparse Fieldsets
 
 ```go
-type UserHandler struct {
-    users map[string]*User
-    mu    sync.RWMutex
-}
-
-func (h *UserHandler) GetResource(ctx context.Context, id string) (interface{}, error) {
-    h.mu.RLock()
-    defer h.mu.RUnlock()
-    
-    user, exists := h.users[id]
-    if !exists {
-        return nil, jsonapi.Error{
-            Status: "404",
-            Title:  "Not Found",
-            Detail: "User not found",
-        }
-    }
-    return user, nil
-}
-
-func (h *UserHandler) GetResources(ctx context.Context) (interface{}, error) {
-    h.mu.RLock()
-    defer h.mu.RUnlock()
-    
-    users := make([]*User, 0, len(h.users))
-    for _, user := range h.users {
-        users = append(users, user)
-    }
-    return users, nil
-}
-
-func (h *UserHandler) CreateResource(ctx context.Context, resource interface{}) (interface{}, error) {
-    user, ok := resource.(*User)
-    if !ok {
-        return nil, jsonapi.Error{
-            Status: "400",
-            Title:  "Bad Request",
-            Detail: "Invalid resource type",
-        }
-    }
-    
-    h.mu.Lock()
-    defer h.mu.Unlock()
-    
-    user.ID = generateID()
-    h.users[user.ID] = user
-    return user, nil
-}
-
-func (h *UserHandler) UpdateResource(ctx context.Context, id string, resource interface{}) (interface{}, error) {
-    user, ok := resource.(*User)
-    if !ok {
-        return nil, jsonapi.Error{
-            Status: "400",
-            Title:  "Bad Request",
-            Detail: "Invalid resource type",
-        }
-    }
-    
-    h.mu.Lock()
-    defer h.mu.Unlock()
-    
-    if _, exists := h.users[id]; !exists {
-        return nil, jsonapi.Error{
-            Status: "404",
-            Title:  "Not Found",
-            Detail: "User not found",
-        }
-    }
-    
-    user.ID = id
-    h.users[id] = user
-    return user, nil
-}
-
-func (h *UserHandler) DeleteResource(ctx context.Context, id string) error {
-    h.mu.Lock()
-    defer h.mu.Unlock()
-    
-    if _, exists := h.users[id]; !exists {
-        return jsonapi.Error{
-            Status: "404",
-            Title:  "Not Found",
-            Detail: "User not found",
-        }
-    }
-    
-    delete(h.users, id)
-    return nil
-}
+// Get sparse fieldsets for a specific resource type
+fields := requestContext.GetFields(r, "users")
+// fields = ["name", "email"] for ?fields[users]=name,email
 ```
 
-### HTTP Server Setup
-
-Use the ResourceHandlerMux for automatic routing:
+### Includes
 
 ```go
-func main() {
-    mux := server.NewResourceHandlerMux()
-    
-    // Register handlers for different resource types
-    mux.Handle("users", &UserHandler{users: make(map[string]*User)})
-    mux.Handle("posts", &PostHandler{posts: make(map[string]*Post)})
-    
-    // The mux automatically handles:
-    // GET /users -> GetResources()
-    // GET /users/123 -> GetResource("123")
-    // POST /users -> CreateResource()
-    // PATCH /users/123 -> UpdateResource("123")
-    // DELETE /users/123 -> DeleteResource("123")
-    
-    log.Println("Server starting on :8080")
-    http.ListenAndServe(":8080", mux)
-}
-```
-
-### Error Handling
-
-The server package provides JSON:API compliant error responses:
-
-```go
-func handleValidationError(w http.ResponseWriter, r *http.Request) {
-    errors := []jsonapi.Error{
-        {
-            Status: "422",
-            Code:   "VALIDATION_ERROR",
-            Title:  "Validation Failed",
-            Detail: "Name is required",
-            Source: map[string]interface{}{
-                "pointer": "/data/attributes/name",
-            },
-        },
-        {
-            Status: "422",
-            Code:   "VALIDATION_ERROR", 
-            Title:  "Validation Failed",
-            Detail: "Email must be valid",
-            Source: map[string]interface{}{
-                "pointer": "/data/attributes/email",
-            },
-        },
-    }
-
-    server.WriteError(w, errors...)
-}
+// Check if a relationship should be included
+shouldIncludePosts := requestContext.ShouldInclude(r, "posts")
+// true for ?include=posts,comments
 ```
 
 ### Content Negotiation
 
-The server package automatically handles JSON:API content negotiation:
-
-- Validates `application/vnd.api+json` Content-Type for requests
-- Sets proper `application/vnd.api+json` Content-Type for responses
-- Returns 415 Unsupported Media Type for invalid Content-Type
-- Returns 406 Not Acceptable for invalid Accept headers
-
-### Response Writing
-
-Use the response utilities for consistent JSON:API responses:
+The server package provides middleware for proper JSON:API content negotiation:
 
 ```go
-// Write a successful resource response
-server.WriteResponse(w, user, http.StatusOK)
-
-// Write a collection response
-server.WriteResponse(w, users, http.StatusOK, jsonapi.IncludeRelatedResources())
-
-// Write an error response
-server.WriteError(w, jsonapi.Error{
-    Status: "500",
-    Title:  "Internal Server Error",
-    Detail: "Something went wrong",
-})
-
-// Write a custom document
-doc := &jsonapi.Document{
-    Data: jsonapi.SingleResource(resource),
-    Meta: map[string]interface{}{
-        "total": 100,
-    },
-}
-server.WriteDocument(w, doc, http.StatusOK)
+// Use content negotiation middleware
+handler = server.UseContentNegotiation(handler)
 ```
+
+This ensures proper handling of the `Accept` and `Content-Type` headers according to the JSON:API specification.
 
 ## Error Handling
 
-The library provides detailed error messages for common issues:
+The library provides comprehensive error handling with detailed error messages:
 
-- Nil pointer inputs
-- Non-struct types
-- JSON marshaling/unmarshaling failures
-- Custom marshaler/unmarshaler errors
-- Invalid JSON:API document structure
-- Type conversion failures
-- Resource type mismatches
+```go
+// Create an error document
+errorDoc := jsonapi.Document{
+    Errors: []jsonapi.Error{
+        {
+            Status: "404",
+            Title:  "Resource not found",
+            Detail: "The requested resource could not be found",
+        },
+    },
+}
 
-## Thread Safety
+// Marshal the error document
+data, err := json.Marshal(errorDoc)
+if err != nil {
+    panic(err)
+}
 
-The library is thread-safe and can be used concurrently without additional synchronization.
-
-## Testing
-
-The library includes comprehensive test coverage with 100% statement coverage across all packages.
-
-Run the test suite:
-
-```bash
-go test ./...
+// Write the error response
+w.Header().Set("Content-Type", "application/vnd.api+json")
+w.WriteHeader(http.StatusNotFound)
+w.Write(data)
 ```
-
-Run tests with coverage:
-
-```bash
-go test -cover ./...
-```
-
-Run tests with detailed coverage report:
-
-```bash
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out
-```
-
-### Test Coverage
-
-- **Core Package**: 100% statement coverage with comprehensive edge case testing
-- **Server Package**: 100% statement coverage with HTTP handler integration tests
-- **Unmarshaling**: Complete test suite covering all unmarshaling scenarios
-- **Error Handling**: Extensive error condition validation
-- **Concurrent Operations**: Thread-safety validation across all components
-
-## Examples
-
-See the `example.go` file for comprehensive usage examples.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass
-5. Submit a pull request
 
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-
-## JSON:API Specification
-
-This library implements the [JSON:API v1.0 specification](https://jsonapi.org/format/).
