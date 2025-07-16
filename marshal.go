@@ -3,303 +3,215 @@ package jsonapi
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"reflect"
 	"strings"
-	"time"
 )
 
-// ResourceMarshaler is an interface that types can implement to provide custom
-// JSON:API resource marshaling behavior. Types implementing this interface
-// will have their MarshalJSONAPIResource method called instead of the default
-// struct tag-based marshaling.
-type ResourceMarshaler interface {
-	// MarshalJSONAPIResource returns a JSON:API Resource representation of the type.
-	// This method should populate the Resource with appropriate Type, ID, Attributes,
-	// and Relationships based on the implementing type's data.
-	MarshalJSONAPIResource(ctx context.Context) (Resource, error)
-}
-
-type LinksMarshaler interface {
-	MarshalJSONAPILinks(ctx context.Context) (map[string]Link, error)
-}
-
-type MetaMarshaler interface {
-	MarshalJSONAPIMeta(ctx context.Context) (map[string]interface{}, error)
-}
-
-type RelationshipLinksMarshaler interface {
-	MarshalJSONAPIRelationshipLinks(ctx context.Context, name string) (map[string]Link, error)
-}
-
-type RelationshipMetaMarshaler interface {
-	MarshalJSONAPIRelationshipMeta(ctx context.Context, name string) (map[string]interface{}, error)
-}
-
+// MarshalOptions contains options for marshaling operations.
 type MarshalOptions struct {
-	isRef bool
+	marshaler      func(interface{}) ([]byte, error)
+	includeRelated bool
 }
 
-// MarshalResourceWithContext converts a Go struct into a JSON:API Resource representation.
-// It supports two marshaling approaches:
-//
-//  1. Custom marshaling: If the input implements ResourceMarshaler interface,
-//     it calls the MarshalJSONAPIResource method.
-//
-//  2. Struct tag marshaling: Uses reflection to parse jsonapi struct tags and
-//     automatically build the Resource.
-//
-// Struct Tag Format:
-//
-//   - Primary key: `jsonapi:"primary,resourcename"`
-//     Sets the resource type (pluralized) and ID from the field value.
-//
-//   - Attributes: `jsonapi:"attr,attributename[,omitempty]"`
-//     Maps struct fields to resource attributes. Nested structs are automatically
-//     converted to map[string]interface{} using JSON marshaling. The omitempty
-//     option skips zero-value fields.
-//
-//   - Relationships: `jsonapi:"relation,relationname[,omitempty]"`
-//     Creates relationships with resource references. For slice fields, marshals
-//     each element into a resource reference. For single fields, creates a single
-//     resource reference or null if empty. The omitempty option skips nil pointer fields.
-//
-// Example usage:
-//
-//	type Address struct {
-//	    Street string `json:"street"`
-//	    City   string `json:"city"`
-//	}
-//
-//	type User struct {
-//	    ID      string  `jsonapi:"primary,user"`
-//	    Name    string  `jsonapi:"attr,name"`
-//	    Address Address `jsonapi:"attr,address"`
-//	    Posts   []Post  `jsonapi:"relation,posts"`
-//	}
-//
-//	type Post struct {
-//	    ID    string `jsonapi:"primary,post"`
-//	    Title string `jsonapi:"attr,title"`
-//	}
-//
-//	user := &User{
-//	    ID: "1",
-//	    Name: "John",
-//	    Address: Address{Street: "123 Main St", City: "NYC"},
-//	    Posts: []Post{{ID: "1", Title: "Hello"}},
-//	}
-//	resource, err := MarshalResourceWithContext(ctx, user)
-//	// Returns: &Resource{
-//	//   Type: "users",
-//	//   ID: "1",
-//	//   Attributes: {
-//	//     "name": "John",
-//	//     "address": {"street": "123 Main St", "city": "NYC"}
-//	//   },
-//	//   Relationships: {"posts": {Data: MultiResource(Resource{Type: "posts", ID: "1"})}},
-//	// }
-//
-// Parameters:
-//   - out: The struct or pointer to struct to marshal. Must not be nil if pointer.
-//
-// Returns:
-//   - *Resource: Pointer to the marshaled JSON:API resource
-//   - error: Error if marshaling fails (nil pointer, unsupported type, etc.)
-func MarshalResourceWithContext(ctx context.Context, out interface{}, opts ...func(*MarshalOptions)) (res Resource, err error) {
-	options := MarshalOptions{}
+// WithMarshaler uses a custom JSON marshaler to serialize documents.
+func WithMarshaler(fn func(interface{}) ([]byte, error)) func(*MarshalOptions) {
+	return func(opts *MarshalOptions) {
+		opts.marshaler = fn
+	}
+}
+
+// IncludeRelatedResources instructs the Marshaler to add any related resources
+// found within the document's primary data to the included array.
+func IncludeRelatedResources() func(*MarshalOptions) {
+	return func(opts *MarshalOptions) {
+		opts.includeRelated = true
+	}
+}
+
+// Marshal marshals a Go struct into a JSON:API Resource using the default context.
+func Marshal(out interface{}, opts ...func(*MarshalOptions)) ([]byte, error) {
+	return MarshalWithContext(context.Background(), out, opts...)
+}
+
+// MarshalWithContext marshals a Go struct into a JSON:API Resource with a provided context.
+func MarshalWithContext(ctx context.Context, out interface{}, opts ...func(*MarshalOptions)) ([]byte, error) {
+	options := &MarshalOptions{
+		marshaler: json.Marshal,
+	}
+
 	for _, opt := range opts {
-		opt(&options)
+		opt(options)
 	}
 
-	if marshaler, ok := out.(ResourceMarshaler); ok {
-		res, err = marshaler.MarshalJSONAPIResource(ctx)
-	} else {
-		res, err = marshalResourceFromStruct(ctx, out, options)
+	doc, err := MarshalDocument(ctx, out, opts...)
+	if err == nil {
+		return options.marshaler(doc)
 	}
 
-	if err != nil {
-		return res, err
-	}
-
-	if marshaler, ok := out.(LinksMarshaler); ok {
-		links, linkserr := marshaler.MarshalJSONAPILinks(ctx)
-		if linkserr == nil {
-			res.Links = links
-		}
-		err = linkserr
-	}
-
-	if marshaler, ok := out.(MetaMarshaler); ok {
-		meta, metaerr := marshaler.MarshalJSONAPIMeta(ctx)
-		if metaerr == nil {
-			res.Meta = meta
-		}
-		err = metaerr
-	}
-
-	relerrs := make([]error, 0, len(res.Relationships))
-	for name, rel := range res.Relationships {
-		if marshaler, ok := out.(RelationshipLinksMarshaler); ok {
-			links, linkserr := marshaler.MarshalJSONAPIRelationshipLinks(ctx, name)
-			if linkserr == nil {
-				rel.Links = links
-			}
-			relerrs = append(relerrs, linkserr)
-		}
-		if marshaler, ok := out.(RelationshipMetaMarshaler); ok {
-			meta, metaerr := marshaler.MarshalJSONAPIRelationshipMeta(ctx, name)
-			if metaerr == nil {
-				rel.Meta = meta
-			}
-			relerrs = append(relerrs, metaerr)
-		}
-	}
-
-	return res, nil
+	return nil, err
 }
 
-func MarshalResource(out interface{}, opts ...func(*MarshalOptions)) (Resource, error) {
-	return MarshalResourceWithContext(context.Background(), out, opts...)
-}
+// MarshalDocument converts a Go value into a JSON:API Document structure.
+// It accepts a context for injection of request-scoped values in marshaling operations.
+// Optional marshaling options can be provided to customize the marshaling behavior.
+// It returns a Document pointer and any error encountered during marshaling.
+// If the input is nil or a nil pointer, it returns an error.
+//
+// This function is the core marshaling function used by Marshal and MarshalWithContext.
+// It can be used directly when you need access to the Document structure before serialization.
+func MarshalDocument(ctx context.Context, out interface{}, opts ...func(*MarshalOptions)) (*Document, error) {
+	options := &MarshalOptions{
+		marshaler: json.Marshal,
+	}
 
-// marshalResourceFromStruct performs the actual struct-to-Resource conversion
-// using reflection and struct tag parsing. This is the core implementation
-// that handles the jsonapi struct tags.
-//
-// The function processes each exported field of the struct, looking for
-// jsonapi tags and building the appropriate Resource components:
-//   - Primary tags set the resource type and ID
-//   - Attr tags populate the Attributes map
-//   - Relation tags create entries in the Relationships map
-//
-// Parameters:
-//   - out: The struct or pointer to struct to process
-//
-// Returns:
-//   - *Resource: The constructed JSON:API resource
-//   - error: Error if the input is invalid (nil pointer, non-struct, etc.)
-func marshalResourceFromStruct(ctx context.Context, out interface{}, opts MarshalOptions) (res Resource, err error) {
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	if out == nil {
+		return nil, fmt.Errorf("cannot marshal nil value")
+	}
+
+	// Check for nil pointer
 	v := reflect.ValueOf(out)
+	if v.Kind() == reflect.Ptr && v.IsNil() {
+		return nil, fmt.Errorf("cannot marshal nil value")
+	}
+
+	doc, err := marshalToDocument(ctx, out, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return doc, nil
+}
+
+// marshalToDocument converts the input to a JSON:API document.
+func marshalToDocument(ctx context.Context, out interface{}, opts *MarshalOptions) (*Document, error) {
+	doc := &Document{}
+
+	// Handle slice inputs
+	if isSlice(out) {
+		resources, included, err := marshalSlice(ctx, out)
+		if err != nil {
+			return nil, err
+		}
+		doc.Data = MultiResource(resources...)
+		if opts.includeRelated {
+			doc.Included = included
+		}
+		return doc, nil
+	}
+
+	// Handle single resource
+	resource, included, err := marshalSingle(ctx, out)
+	if err != nil {
+		return nil, err
+	}
+
+	doc.Data = SingleResource(resource)
+	if opts.includeRelated {
+		doc.Included = included
+	}
+
+	return doc, nil
+}
+
+// marshalSlice marshals a slice of structs to resources.
+func marshalSlice(ctx context.Context, out interface{}) ([]Resource, []Resource, error) {
+	v := reflect.ValueOf(out)
+	if v.Kind() != reflect.Slice {
+		return nil, nil, fmt.Errorf("expected slice, got %T", out)
+	}
+
+	var resources []Resource
+	var included []Resource
+
+	for i := 0; i < v.Len(); i++ {
+		elem := v.Index(i).Interface()
+		resource, relatedResources, err := marshalSingle(ctx, elem)
+		if err != nil {
+			return nil, nil, err
+		}
+		resources = append(resources, resource)
+		included = append(included, relatedResources...)
+	}
+
+	return resources, included, nil
+}
+
+// marshalSingle marshals a single struct to a resource.
+func marshalSingle(ctx context.Context, out interface{}) (Resource, []Resource, error) {
+	var resource Resource
+	var included []Resource
+	var err error
+
+	// Check if the type implements ResourceMarshaler
+	if marshaler, ok := out.(ResourceMarshaler); ok {
+		resource, err = marshaler.MarshalJSONAPIResource(ctx)
+		if err != nil {
+			return Resource{}, nil, err
+		}
+	} else {
+		// Use reflection-based marshaling
+		resource, included, err = marshalWithReflection(ctx, out)
+		if err != nil {
+			return Resource{}, nil, err
+		}
+	}
+
+	// Add custom links if the type implements LinksMarshaler
+	if linksMarshaler, ok := out.(LinksMarshaler); ok {
+		links, err := linksMarshaler.MarshalJSONAPILinks(ctx)
+		if err != nil {
+			return Resource{}, nil, err
+		}
+		resource.Links = links
+	}
+
+	// Add custom meta if the type implements MetaMarshaler
+	if metaMarshaler, ok := out.(MetaMarshaler); ok {
+		meta, err := metaMarshaler.MarshalJSONAPIMeta(ctx)
+		if err != nil {
+			return Resource{}, nil, err
+		}
+		resource.Meta = meta
+	}
+
+	return resource, included, nil
+}
+
+// marshalWithReflection uses reflection to marshal a struct based on tags.
+func marshalWithReflection(ctx context.Context, out interface{}) (Resource, []Resource, error) {
+	v := reflect.ValueOf(out)
+
+	// Dereference pointer if necessary
 	if v.Kind() == reflect.Ptr {
 		if v.IsNil() {
-			return res, errors.New("cannot marshal nil pointer")
+			return Resource{}, nil, fmt.Errorf("cannot marshal nil pointer")
 		}
 		v = v.Elem()
 	}
 
 	if v.Kind() != reflect.Struct {
-		return res, errors.New("expected struct or pointer to struct")
+		return Resource{}, nil, fmt.Errorf("expected struct, got %T", out)
 	}
 
-	t := v.Type()
-	res = Resource{
+	resource := Resource{
 		Attributes:    make(map[string]interface{}),
 		Relationships: make(map[string]Relationship),
 	}
 
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		fieldValue := v.Field(i)
+	var included []Resource
+	t := v.Type()
 
-		// Skip unexported fields
-		if !field.IsExported() {
-			continue
-		}
+	// Process all fields including embedded ones
+	fields := getAllFields(t)
 
-		// Handle embedded structs
-		if field.Anonymous && fieldValue.Kind() == reflect.Struct {
-			// Process embedded struct fields directly
-			embeddedType := fieldValue.Type()
-			for j := 0; j < embeddedType.NumField(); j++ {
-				embeddedField := embeddedType.Field(j)
-				embeddedFieldValue := fieldValue.Field(j)
-
-				// Skip unexported fields
-				if !embeddedField.IsExported() {
-					continue
-				}
-
-				embeddedTag := embeddedField.Tag.Get("jsonapi")
-				if embeddedTag == "" {
-					continue
-				}
-
-				embeddedParts := strings.Split(embeddedTag, ",")
-				if len(embeddedParts) < 2 {
-					continue
-				}
-
-				embeddedTagType := embeddedParts[0]
-				embeddedTagName := embeddedParts[1]
-
-				switch embeddedTagType {
-				case "primary":
-					res.Type = pluralize(embeddedTagName)
-					res.ID = embeddedFieldValue.String()
-
-				case "attr":
-					if opts.isRef {
-						continue
-					}
-
-					if !embeddedFieldValue.IsZero() || !hasOmitEmpty(embeddedParts) {
-						attrValue, err := marshalAttributeValue(embeddedFieldValue)
-						if err != nil {
-							return res, err
-						}
-						res.Attributes[embeddedTagName] = attrValue
-					}
-
-				case "relation":
-					if opts.isRef {
-						continue
-					}
-
-					// Handle omitempty for zero values
-					if hasOmitEmpty(embeddedParts) && embeddedFieldValue.IsZero() {
-						continue
-					}
-
-					if embeddedFieldValue.Kind() == reflect.Slice {
-						// Handle slice relationships
-						var relatedResources []Resource
-
-						// If slice is not empty, marshal each element
-						if !embeddedFieldValue.IsZero() && embeddedFieldValue.Len() > 0 {
-							for k := 0; k < embeddedFieldValue.Len(); k++ {
-								elem := embeddedFieldValue.Index(k)
-								relatedResource, err := marshalResourceReference(ctx, elem.Interface())
-								if err != nil {
-									return res, err
-								}
-								relatedResources = append(relatedResources, relatedResource)
-							}
-						}
-
-						res.Relationships[embeddedTagName] = Relationship{
-							Data: MultiResource(relatedResources...),
-						}
-					} else {
-						// Handle single relationships
-						if embeddedFieldValue.IsZero() {
-							res.Relationships[embeddedTagName] = Relationship{
-								Data: NullResource(),
-							}
-						} else {
-							relatedResource, err := marshalResourceReference(ctx, embeddedFieldValue.Interface())
-							if err != nil {
-								return res, err
-							}
-							res.Relationships[embeddedTagName] = Relationship{
-								Data: SingleResource(relatedResource),
-							}
-						}
-					}
-				}
-			}
-			continue
-		}
+	for _, fieldInfo := range fields {
+		field := fieldInfo.Field
+		fieldValue := getFieldValue(v, fieldInfo)
 
 		tag := field.Tag.Get("jsonapi")
 		if tag == "" {
@@ -312,188 +224,149 @@ func marshalResourceFromStruct(ctx context.Context, out interface{}, opts Marsha
 		}
 
 		tagType := parts[0]
-		tagName := parts[1]
+		name := parts[1]
+		options := parts[2:]
+
+		// Check omitempty option
+		if contains(options, "omitempty") && isZeroValue(fieldValue) {
+			continue
+		}
 
 		switch tagType {
 		case "primary":
-			res.Type = pluralize(tagName)
-			res.ID = fieldValue.String()
-
+			resource.Type = name
+			resource.ID = fmt.Sprintf("%v", fieldValue.Interface())
 		case "attr":
-			if opts.isRef {
-				continue
-			}
-
-			if !fieldValue.IsZero() || !hasOmitEmpty(parts) {
-				attrValue, err := marshalAttributeValue(fieldValue)
-				if err != nil {
-					return res, err
-				}
-				res.Attributes[tagName] = attrValue
-			}
-
+			resource.Attributes[name] = fieldValue.Interface()
 		case "relation":
-			if opts.isRef {
-				continue
+			rel, relatedResources, err := marshalRelationship(ctx, fieldValue, options)
+			if err != nil {
+				return Resource{}, nil, err
 			}
-
-			// Handle omitempty for zero values
-			if hasOmitEmpty(parts) && fieldValue.IsZero() {
-				continue
-			}
-
-			if fieldValue.Kind() == reflect.Slice {
-				// Handle slice relationships
-				var relatedResources []Resource
-
-				// If slice is not empty, marshal each element
-				if !fieldValue.IsZero() && fieldValue.Len() > 0 {
-					for j := 0; j < fieldValue.Len(); j++ {
-						elem := fieldValue.Index(j)
-						relatedResource, err := marshalResourceReference(ctx, elem.Interface())
-						if err != nil {
-							return res, err
-						}
-						relatedResources = append(relatedResources, relatedResource)
-					}
-				}
-
-				res.Relationships[tagName] = Relationship{
-					Data: MultiResource(relatedResources...),
-				}
-			} else {
-				// Handle single relationships
-				if fieldValue.IsZero() {
-					res.Relationships[tagName] = Relationship{
-						Data: NullResource(),
-					}
-				} else {
-					relatedResource, err := marshalResourceReference(ctx, fieldValue.Interface())
-					if err != nil {
-						return res, err
-					}
-					res.Relationships[tagName] = Relationship{
-						Data: SingleResource(relatedResource),
-					}
-				}
-			}
+			resource.Relationships[name] = rel
+			included = append(included, relatedResources...)
 		}
 	}
 
-	return res, nil
+	return resource, included, nil
 }
 
-// marshalAttributeValue converts a field value to an appropriate attribute value.
-// For structs, it converts them to map[string]interface{} using JSON marshaling/unmarshaling.
-// For other types, it returns the value as-is.
-//
-// Parameters:
-//   - fieldValue: The reflect.Value of the field to marshal
-//
-// Returns:
-//   - interface{}: The marshaled attribute value
-//   - error: Error if marshaling fails
-func marshalAttributeValue(fieldValue reflect.Value) (interface{}, error) {
-	fieldInterface := fieldValue.Interface()
+// marshalRelationship marshals a relationship field.
+func marshalRelationship(ctx context.Context, fieldValue reflect.Value, options []string) (Relationship, []Resource, error) {
+	rel := Relationship{}
+	var included []Resource
 
-	// Special case for time.Time - treat it as a primitive value
-	if _, ok := fieldInterface.(time.Time); ok {
-		return fieldInterface, nil
+	if isZeroValue(fieldValue) {
+		if contains(options, "omitempty") {
+			return rel, nil, nil
+		}
+		rel.Data = NullResource()
+		return rel, nil, nil
 	}
 
-	// If it's a struct (but not a pointer), convert it to map[string]interface{}
-	if fieldValue.Kind() == reflect.Struct {
-		return structToMap(fieldInterface)
+	if fieldValue.Kind() == reflect.Slice {
+		// Handle slice relationships
+		var resources []Resource
+		for i := 0; i < fieldValue.Len(); i++ {
+			elem := fieldValue.Index(i).Interface()
+			resource, relatedResources, err := marshalSingle(ctx, elem)
+			if err != nil {
+				return Relationship{}, nil, err
+			}
+			resources = append(resources, resource.Ref())
+			included = append(included, resource)
+			included = append(included, relatedResources...)
+		}
+		rel.Data = MultiResource(resources...)
+	} else {
+		// Handle single relationships
+		elem := fieldValue.Interface()
+		resource, relatedResources, err := marshalSingle(ctx, elem)
+		if err != nil {
+			return Relationship{}, nil, err
+		}
+		rel.Data = SingleResource(resource.Ref())
+		included = append(included, resource)
+		included = append(included, relatedResources...)
 	}
 
-	// For all other types, return as-is
-	return fieldInterface, nil
+	return rel, included, nil
 }
 
-// structToMap converts a struct to map[string]interface{} using JSON marshaling.
-// This ensures that nested structs are properly serialized for JSON:API attributes.
-//
-// Parameters:
-//   - s: The struct to convert
-//
-// Returns:
-//   - map[string]interface{}: The struct converted to a map
-//   - error: Error if conversion fails
-func structToMap(s interface{}) (map[string]interface{}, error) {
-	// Use JSON marshaling to convert struct to map
-	// This handles all the JSON tags and nested structures properly
+// Helper functions
 
-	// Marshal to JSON
-	jsonBytes, err := json.Marshal(s)
-	if err != nil {
-		return nil, err
-	}
-
-	// Unmarshal back to map
-	var result map[string]interface{}
-	err = json.Unmarshal(jsonBytes, &result)
-	if err != nil {
-		return nil, err
-	}
-
-	return result, nil
+// fieldInfo holds information about a field and how to access it.
+type fieldInfo struct {
+	Field reflect.StructField
+	Path  []int // Path to the field through embedded structs
 }
 
-// marshalResourceReference creates a resource reference (ID and Type only) from a struct.
-// This is used for relationships where we only need the resource identifier, not the full data.
-//
-// Parameters:
-//   - out: The struct or pointer to struct to create a reference for
-//
-// Returns:
-//   - Resource: A resource with only ID and Type populated (reference)
-//   - error: Error if marshaling fails
-func marshalResourceReference(ctx context.Context, out interface{}) (Resource, error) {
-	fullResource, err := MarshalResourceWithContext(ctx, out, func(mo *MarshalOptions) { mo.isRef = true })
-	if err != nil {
-		return Resource{}, err
-	}
-
-	// Return only the reference (ID and Type)
-	return fullResource.Ref(), nil
+// getAllFields returns all fields including embedded struct fields.
+func getAllFields(t reflect.Type) []fieldInfo {
+	var fields []fieldInfo
+	collectFields(t, nil, &fields)
+	return fields
 }
 
-// hasOmitEmpty checks if the "omitempty" option is present in the struct tag parts.
-// This is used to determine whether zero-value fields should be omitted from
-// the marshaled output.
-//
-// Parameters:
-//   - parts: Slice of tag components split by comma
-//
-// Returns:
-//   - bool: true if "omitempty" is found in the parts, false otherwise
-func hasOmitEmpty(parts []string) bool {
-	for _, part := range parts {
-		if part == "omitempty" {
+// collectFields recursively collects fields from a struct type.
+func collectFields(t reflect.Type, path []int, fields *[]fieldInfo) {
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		currentPath := append(path, i)
+
+		if field.Anonymous && field.Type.Kind() == reflect.Struct {
+			// Embedded struct - recursively collect its fields
+			collectFields(field.Type, currentPath, fields)
+		} else {
+			*fields = append(*fields, fieldInfo{
+				Field: field,
+				Path:  currentPath,
+			})
+		}
+	}
+}
+
+// getFieldValue gets the value of a field using the path information.
+func getFieldValue(v reflect.Value, info fieldInfo) reflect.Value {
+	fieldValue := v
+	for _, index := range info.Path {
+		fieldValue = fieldValue.Field(index)
+	}
+	return fieldValue
+}
+
+// isSlice checks if the value is a slice.
+func isSlice(v interface{}) bool {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return false
+		}
+		rv = rv.Elem()
+	}
+	return rv.Kind() == reflect.Slice
+}
+
+// isZeroValue checks if a reflect.Value is the zero value for its type.
+func isZeroValue(v reflect.Value) bool {
+	if !v.IsValid() {
+		return true
+	}
+
+	switch v.Kind() {
+	case reflect.Ptr, reflect.Interface, reflect.Slice, reflect.Map, reflect.Chan, reflect.Func:
+		return v.IsNil()
+	default:
+		return v.IsZero()
+	}
+}
+
+// contains checks if a slice contains a string.
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
 			return true
 		}
 	}
 	return false
-}
-
-// pluralize converts a singular resource name to its plural form for use as
-// the JSON:API resource type. Currently implements simple pluralization by
-// appending 's' to the input word.
-//
-// This is a basic implementation that could be enhanced with more sophisticated
-// pluralization rules (e.g., handling irregular plurals like "person" -> "people").
-//
-// Parameters:
-//   - word: The singular resource name to pluralize
-//
-// Returns:
-//   - string: The pluralized resource type name
-//
-// Example:
-//   - pluralize("user") returns "users"
-//   - pluralize("order") returns "orders"
-func pluralize(word string) string {
-	// Simple pluralization - add 's' to the end
-	// This could be made more sophisticated with proper pluralization rules
-	return word + "s"
 }
