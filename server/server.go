@@ -211,9 +211,9 @@ type Response struct {
 
 // HandlerFunc is a function type that processes JSON:API requests and returns
 // structured responses. It receives the parsed request context and HTTP request,
-// and returns a [Response] struct or an error. This provides a more convenient
+// and returns a [Response] struct. This provides a more convenient
 // way to write JSON:API handlers compared to the standard [http.HandlerFunc] type.
-type HandlerFunc func(*RequestContext, *http.Request) (res Response, err error)
+type HandlerFunc func(*RequestContext, *http.Request) (res Response)
 
 // ServeHTTP implements the http.Handler interface for Handler functions.
 // It calls the handler function with the request context and handles the
@@ -226,11 +226,7 @@ func (h HandlerFunc) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := h(requestContext, r)
-	if err != nil {
-		Error(w, err, http.StatusInternalServerError)
-		return
-	}
+	res := h(requestContext, r)
 
 	for k, v := range res.Header {
 		w.Header()[k] = v
@@ -260,47 +256,21 @@ func Write(w http.ResponseWriter, body *jsonapi.Document, status int) {
 // Supported error types:
 //   - jsonapi.Error: Used directly
 //   - jsonapi.MultiError: All errors are included in the response
-//   - []jsonapi.Error: All errors are included in the response
 //   - Other error types: Converted to [jsonapi.Error] with the provided status
 //
 // The response will have Content-Type set to application/vnd.api+json and include
 // a JSON:API document containing the formatted error(s).
 func Error(w http.ResponseWriter, err error, status int) {
-	errs := []jsonapi.Error{}
-	var (
-		jsonapiErr      jsonapi.Error
-		jsonapiMultiErr jsonapi.MultiError
-	)
-
-	if errors.As(err, &jsonapiErr) {
-		//
-		// add jsonapi error to list
-		//
-		errs = append(errs, jsonapiErr)
-	} else if errors.As(err, &jsonapiMultiErr) {
-		//
-		// replace jsonapi error list with provided list
-		//
-		errs = []jsonapi.Error(jsonapiMultiErr)
-	} else if err != nil {
-		//
-		// convert standard error into jsonapi error
-		//
-		errs = append(errs, jsonapi.Error{
-			Status: strconv.Itoa(status),
-			Title:  http.StatusText(status),
-			Detail: err.Error(),
-		})
-	} else {
-		//
-		// return an unknown error
-		//
-		errs = append(errs, jsonapi.Error{
-			Status: strconv.Itoa(status),
-			Title:  http.StatusText(status),
-			Detail: "Unknown error",
-		})
+	doc := jsonapi.NewErrorDocument(err)
+	for i, e := range doc.Errors {
+		if e.Status == "" {
+			e.Status = strconv.Itoa(status)
+		}
+		if e.Title == "" {
+			e.Title = http.StatusText(status)
+		}
+		doc.Errors[i] = e
 	}
 
-	Write(w, &jsonapi.Document{Errors: errs}, status)
+	Write(w, doc, status)
 }

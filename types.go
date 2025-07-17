@@ -225,6 +225,37 @@ type Error struct {
 	Links  map[string]interface{} `json:"links,omitempty"`
 }
 
+// NewErrorDocument creates a new [Document] to represent errors in a JSON:API compliant format.
+// This function handles different types of errors and converts them into the appropriate Document structure.
+//
+//   - When the provided error wraps or is of type [Error], the function will use that error directly in the document
+//   - If the error wraps or is of type [MultiError], all of the contained errors will be included in the document.
+//
+// For any other error type, the function creates a generic error entry using the error's message as the detail field.
+// This ensures that even standard Go errors can be represented in the JSON:API format.
+//
+// If a nil error is provided, the function creates a document with a generic "Unknown error" message.
+// This prevents returning empty error documents.
+func NewErrorDocument(err error) *Document {
+	var (
+		doc          Document
+		jsonErr      Error
+		jsonMultiErr MultiError
+	)
+
+	if errors.As(err, &jsonErr) {
+		doc.Errors = []Error{jsonErr}
+	} else if errors.As(err, &jsonMultiErr) {
+		doc.Errors = jsonMultiErr
+	} else if err != nil {
+		doc.Errors = append(doc.Errors, Error{Detail: err.Error()})
+	} else {
+		doc.Errors = append(doc.Errors, Error{Detail: "Unknown error"})
+	}
+
+	return &doc
+}
+
 // Error returns a string representation of the error.
 // The returned string will include the title, detail, and code if they are available.
 // If only the title and detail are available, it returns them formatted as "title: detail".

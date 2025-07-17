@@ -758,10 +758,10 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		var receivedContext *server.RequestContext
 		var receivedRequest *http.Request
 
-		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) (server.Response, error) {
+		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) server.Response {
 			receivedContext = ctx
 			receivedRequest = r
-			return server.Response{Status: http.StatusOK}, nil
+			return server.Response{Status: http.StatusOK}
 		})
 
 		expectedContext := &server.RequestContext{
@@ -782,7 +782,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	})
 
 	t.Run("sets response status and headers", func(t *testing.T) {
-		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) (server.Response, error) {
+		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) server.Response {
 			header := make(http.Header)
 			header.Set("X-Custom", "test-value")
 			header.Set("X-Another", "another-value")
@@ -791,7 +791,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 				Status: http.StatusCreated,
 				Header: header,
 				Body:   &jsonapi.Document{}, // Need body for Content-Type to be set
-			}, nil
+			}
 		})
 
 		req := httptest.NewRequest("POST", "/users", nil)
@@ -815,11 +815,11 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			},
 		}
 
-		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) (server.Response, error) {
+		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) server.Response {
 			return server.Response{
 				Status: http.StatusOK,
 				Body:   doc,
-			}, nil
+			}
 		})
 
 		req := httptest.NewRequest("GET", "/users", nil)
@@ -841,11 +841,11 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	})
 
 	t.Run("handles nil body", func(t *testing.T) {
-		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) (server.Response, error) {
+		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) server.Response {
 			return server.Response{
 				Status: http.StatusNoContent,
 				Body:   nil,
-			}, nil
+			}
 		})
 
 		req := httptest.NewRequest("DELETE", "/users/123", nil)
@@ -864,8 +864,11 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	})
 
 	t.Run("returns 500 when handler returns error", func(t *testing.T) {
-		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) (server.Response, error) {
-			return server.Response{}, errors.New("handler error")
+		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) server.Response {
+			return server.Response{
+				Status: 500,
+				Body:   jsonapi.NewErrorDocument(errors.New("handler error")),
+			}
 		})
 
 		req := httptest.NewRequest("GET", "/users", nil)
@@ -880,8 +883,8 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	})
 
 	t.Run("returns 500 when no request context", func(t *testing.T) {
-		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) (server.Response, error) {
-			return server.Response{Status: http.StatusOK}, nil
+		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) server.Response {
+			return server.Response{Status: http.StatusOK}
 		})
 
 		req := httptest.NewRequest("GET", "/users", nil)
@@ -905,7 +908,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	})
 
 	t.Run("preserves existing headers and adds content-type", func(t *testing.T) {
-		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) (server.Response, error) {
+		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) server.Response {
 			header := make(http.Header)
 			header.Set("Content-Type", "text/plain") // This should be overridden
 			header.Set("X-Custom", "value")
@@ -914,7 +917,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 				Status: http.StatusOK,
 				Header: header,
 				Body:   &jsonapi.Document{}, // Need body for Content-Type to be set
-			}, nil
+			}
 		})
 
 		req := httptest.NewRequest("GET", "/users", nil)
@@ -1196,7 +1199,7 @@ func TestDefaultContextResolver_ResolveRequestContext(t *testing.T) {
 func TestIntegration_FullRequestFlow(t *testing.T) {
 	t.Run("complete GET resource flow", func(t *testing.T) {
 		// Create a handler that returns a JSON:API document
-		getHandler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) (server.Response, error) {
+		getHandler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) server.Response {
 			assert.Equal(t, "users", ctx.ResourceType)
 			assert.Equal(t, "123", ctx.ResourceID)
 
@@ -1213,7 +1216,7 @@ func TestIntegration_FullRequestFlow(t *testing.T) {
 			return server.Response{
 				Status: http.StatusOK,
 				Body:   doc,
-			}, nil
+			}
 		})
 
 		resourceHandler := server.ResourceHandler{Get: getHandler}
@@ -1240,7 +1243,7 @@ func TestIntegration_FullRequestFlow(t *testing.T) {
 	})
 
 	t.Run("complete POST resource flow", func(t *testing.T) {
-		createHandler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) (server.Response, error) {
+		createHandler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) server.Response {
 			assert.Equal(t, "users", ctx.ResourceType)
 			assert.Equal(t, "", ctx.ResourceID) // No ID for POST
 
@@ -1261,7 +1264,7 @@ func TestIntegration_FullRequestFlow(t *testing.T) {
 				Status: http.StatusCreated,
 				Header: header,
 				Body:   doc,
-			}, nil
+			}
 		})
 
 		resourceHandler := server.ResourceHandler{Create: createHandler}
@@ -1279,7 +1282,7 @@ func TestIntegration_FullRequestFlow(t *testing.T) {
 	})
 
 	t.Run("complete relationship flow", func(t *testing.T) {
-		relationshipHandler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) (server.Response, error) {
+		relationshipHandler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) server.Response {
 			assert.Equal(t, "users", ctx.ResourceType)
 			assert.Equal(t, "123", ctx.ResourceID)
 			assert.Equal(t, "posts", ctx.Relationship)
@@ -1294,7 +1297,7 @@ func TestIntegration_FullRequestFlow(t *testing.T) {
 			return server.Response{
 				Status: http.StatusOK,
 				Body:   doc,
-			}, nil
+			}
 		})
 
 		resourceHandler := server.ResourceHandler{Relationship: relationshipHandler}
@@ -1322,11 +1325,11 @@ func TestIntegration_FullRequestFlow(t *testing.T) {
 
 func TestEdgeCases(t *testing.T) {
 	t.Run("handler with nil response body", func(t *testing.T) {
-		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) (server.Response, error) {
+		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) server.Response {
 			return server.Response{
 				Status: http.StatusNoContent,
 				Body:   nil,
-			}, nil
+			}
 		})
 
 		req := httptest.NewRequest("DELETE", "/users/123", nil)
@@ -1344,7 +1347,7 @@ func TestEdgeCases(t *testing.T) {
 	})
 
 	t.Run("multiple headers with same name", func(t *testing.T) {
-		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) (server.Response, error) {
+		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) server.Response {
 			header := make(http.Header)
 			header.Add("X-Custom", "value1")
 			header.Add("X-Custom", "value2")
@@ -1352,7 +1355,7 @@ func TestEdgeCases(t *testing.T) {
 			return server.Response{
 				Status: http.StatusOK,
 				Header: header,
-			}, nil
+			}
 		})
 
 		req := httptest.NewRequest("GET", "/users", nil)
@@ -1441,9 +1444,9 @@ func TestEdgeCases(t *testing.T) {
 func TestConcurrency(t *testing.T) {
 	t.Run("concurrent requests to same handler", func(t *testing.T) {
 		var callCount atomic.Int64
-		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) (server.Response, error) {
+		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) server.Response {
 			callCount.Add(1)
-			return server.Response{Status: http.StatusOK}, nil
+			return server.Response{Status: http.StatusOK}
 		})
 
 		resourceHandler := server.ResourceHandler{Get: handler}

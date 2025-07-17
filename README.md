@@ -1,5 +1,9 @@
 # JSON:API Library for Go
 
+[![Test](https://github.com/nisimpson/jsonapi/actions/workflows/test.yml/badge.svg)](https://github.com/nisimpson/jsonapi/actions/workflows/test.yml)
+[![GoDoc](https://godoc.org/github.com/nisimpson/jsonapi?status.svg)](http://godoc.org/github.com/nisimpson/jsonapi)
+[![Release](https://img.shields.io/github/release/nisimpson/jsonapi.svg)](https://github.com/nisimpson/jsonapi/releases)
+
 A comprehensive Go library for marshaling Go structs into JSON:API compliant resources and unmarshaling JSON:API documents back into Go structs. This library supports both automatic struct tag-based marshaling/unmarshaling and custom marshaling/unmarshaling through interfaces.
 
 ## Features
@@ -44,7 +48,7 @@ import (
     "context"
     "encoding/json"
     "fmt"
-    
+
     "github.com/nisimpson/jsonapi"
 )
 
@@ -61,13 +65,13 @@ func main() {
         Name:  "John Doe",
         Email: "john@example.com",
     }
-    
+
     // Marshal to JSON:API
     data, err := jsonapi.Marshal(user)
     if err != nil {
         panic(err)
     }
-    
+
     fmt.Println(string(data))
     // Output:
     // {"data":{"id":"123","type":"users","attributes":{"email":"john@example.com","name":"John Doe"}}}
@@ -82,7 +86,7 @@ package main
 import (
     "context"
     "fmt"
-    
+
     "github.com/nisimpson/jsonapi"
 )
 
@@ -104,13 +108,13 @@ func main() {
             }
         }
     }`)
-    
+
     var user User
     err := jsonapi.Unmarshal(jsonData, &user)
     if err != nil {
         panic(err)
     }
-    
+
     fmt.Printf("User: %s (%s)\n", user.Name, user.Email)
     // Output:
     // User: John Doe (john@example.com)
@@ -242,12 +246,12 @@ if err != nil {
 // Iterate over resources in the primary data
 for resource := range doc.Data.Iter() {
     fmt.Printf("Resource ID: %s, Type: %s\n", resource.ID, resource.Type)
-    
+
     // Process attributes
     for name, value := range resource.Attributes {
         fmt.Printf("Attribute %s: %v\n", name, value)
     }
-    
+
     // Process relationships
     for name, rel := range resource.Relationships {
         fmt.Printf("Relationship %s\n", name)
@@ -329,7 +333,7 @@ package main
 
 import (
     "net/http"
-    
+
     "github.com/nisimpson/jsonapi"
     "github.com/nisimpson/jsonapi/server"
 )
@@ -342,16 +346,16 @@ func main() {
         Search: http.HandlerFunc(searchUsersHandler),
         // Add other handlers as needed
     }
-    
+
     // Create a resource handler mux
     mux := server.ResourceHandlerMux{
         "users": usersHandler,
         // Add other resource types as needed
     }
-    
+
     // Create a default handler with standard JSON:API routes
     handler := server.DefaultHandler(mux)
-    
+
     // Start the server
     http.ListenAndServe(":8080", handler)
 }
@@ -359,17 +363,17 @@ func main() {
 func getUserHandler(w http.ResponseWriter, r *http.Request) {
     ctx := r.Context()
     requestContext, _ := server.GetRequestContext(ctx)
-    
+
     // Get the user by ID
     user := getUser(requestContext.ResourceID)
-    
+
     // Marshal the user to JSON:API
     doc, err := jsonapi.MarshalDocument(ctx, user)
     if err != nil {
         http.Error(w, err.Error(), http.StatusInternalServerError)
         return
     }
-    
+
     // Write the response
     w.Header().Set("Content-Type", "application/vnd.api+json")
     json.NewEncoder(w).Encode(doc)
@@ -387,7 +391,7 @@ package main
 
 import (
     "net/http"
-    
+
     "github.com/nisimpson/jsonapi"
     "github.com/nisimpson/jsonapi/server"
 )
@@ -399,33 +403,49 @@ func main() {
         Create: server.HandlerFunc(createUser),
         Search: server.HandlerFunc(searchUsers),
     }
-    
+
     // Create a resource handler mux
     mux := server.ResourceHandlerMux{
         "users": usersHandler,
     }
-    
+
     // Create a default handler with standard JSON:API routes
     handler := server.DefaultHandler(mux)
-    
+
     // Start the server
     http.ListenAndServe(":8080", handler)
 }
 
 // Using HandlerFunc for cleaner handler implementation
-func getUser(ctx *server.RequestContext, r *http.Request) (server.Response, error) {
+func getUser(ctx *server.RequestContext, r *http.Request) server.Response {
     // Get the user by ID
     user, err := fetchUserFromDatabase(ctx.ResourceID)
     if err != nil {
-        return server.Response{}, err // Error will be automatically formatted as JSON:API error
+        // Return a 404 response with error
+        return server.Response{
+            Status: http.StatusNotFound,
+            Body: jsonapi.NewErrorDocument(jsonapi.Error{
+                Status: "404",
+                Title:  "Resource not found",
+                Detail: err.Error(),
+            }),
+        }
     }
-    
+
     // Marshal the user to JSON:API
     doc, err := jsonapi.MarshalDocument(r.Context(), user)
     if err != nil {
-        return server.Response{}, err
+        // Return a 500 response with error
+        return server.Response{
+            Status: http.StatusInternalServerError,
+            Body: jsonapi.NewErrorDocument(jsonapi.Error{
+                Status: "500",
+                Title:  "Internal server error",
+                Detail: err.Error(),
+            }),
+        }
     }
-    
+
     // Return a structured response
     return server.Response{
         Status: http.StatusOK,
@@ -433,40 +453,50 @@ func getUser(ctx *server.RequestContext, r *http.Request) (server.Response, erro
             "Cache-Control": []string{"max-age=3600"},
         },
         Body: doc,
-    }, nil
+    }
 }
 
 // Example of handling errors with HandlerFunc
-func createUser(ctx *server.RequestContext, r *http.Request) (server.Response, error) {
+func createUser(ctx *server.RequestContext, r *http.Request) server.Response {
     var user User
-    
+
     // Parse request body
-    doc, err := jsonapi.UnmarshalDocument(r.Body)
-    if err != nil {
-        // Return a custom JSON:API error
-        return server.Response{}, jsonapi.Error{
-            Status: "400",
-            Title:  "Invalid request body",
-            Detail: "The request body could not be parsed as a valid JSON:API document",
+    if err := jsonapi.UnmarshalResourceInto(r.Context(), doc.Data, &user); err != nil {
+        return server.Response{
+            Status: http.StatusBadRequest,
+            Body: jsonapi.NewErrorDocument(jsonapi.Error{
+                Status: "400",
+                Title:  "Invalid request body",
+                Detail: err.Error(),
+            }),
         }
     }
-    
-    // Unmarshal document into user struct
-    if err := jsonapi.UnmarshalResourceInto(r.Context(), doc.Data, &user); err != nil {
-        return server.Response{}, err
-    }
-    
+
     // Save user to database
     if err := saveUserToDatabase(&user); err != nil {
-        return server.Response{}, err
+        return server.Response{
+            Status: http.StatusInternalServerError,
+            Body: jsonapi.NewErrorDocument(jsonapi.Error{
+                Status: "500",
+                Title:  "Internal server error",
+                Detail: err.Error(),
+            }),
+        }
     }
-    
+
     // Marshal the created user to JSON:API
     responseDoc, err := jsonapi.MarshalDocument(r.Context(), user)
     if err != nil {
-        return server.Response{}, err
+        return server.Response{
+            Status: http.StatusInternalServerError,
+            Body: jsonapi.NewErrorDocument(jsonapi.Error{
+                Status: "500",
+                Title:  "Internal server error",
+                Detail: err.Error(),
+            }),
+        }
     }
-    
+
     // Return a structured response with 201 Created status
     return server.Response{
         Status: http.StatusCreated,
@@ -474,7 +504,7 @@ func createUser(ctx *server.RequestContext, r *http.Request) (server.Response, e
             "Location": []string{"/users/" + user.ID},
         },
         Body: responseDoc,
-    }, nil
+    }
 }
 ```
 
@@ -486,6 +516,7 @@ The `server.HandlerFunc` type provides several advantages:
 4. Cleaner handler implementation with less boilerplate code
 
 The `server.Response` struct allows you to specify:
+
 - HTTP status code
 - Custom HTTP headers
 - JSON:API document body
