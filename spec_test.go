@@ -114,7 +114,7 @@ func TestSpecificationCompliance(t *testing.T) {
 		// Test iterator
 		var collected []Resource
 		for r := range multi.Iter() {
-			collected = append(collected, r)
+			collected = append(collected, *r)
 		}
 		assert.Len(t, collected, 2)
 	})

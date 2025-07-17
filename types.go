@@ -36,6 +36,31 @@ func (r Resource) Ref() Resource {
 	}
 }
 
+// ApplySparseFieldsets filters the resource's attributes to only include the specified fields.
+// If fields is empty, all attributes are retained. Otherwise, only attributes whose names
+// match one of the provided fields are kept, and all other attributes are removed.
+func (r *Resource) ApplySparseFieldsets(fields []string) {
+	// If no fields specified, keep all attributes
+	if len(fields) == 0 {
+		return
+	}
+
+	// Create a map for O(1) field lookups
+	fieldMap := make(map[string]struct{})
+	for _, field := range fields {
+		fieldMap[field] = struct{}{}
+	}
+
+	// Filter attributes to only keep specified fields
+	filteredAttrs := make(map[string]interface{})
+	for key, value := range r.Attributes {
+		if _, exists := fieldMap[key]; exists {
+			filteredAttrs[key] = value
+		}
+	}
+	r.Attributes = filteredAttrs
+}
+
 // PrimaryData represents the primary data in a JSON:API document.
 // It can be a single resource, multiple resources, or null.
 type PrimaryData struct {
@@ -83,13 +108,13 @@ func (pd PrimaryData) Many() ([]Resource, bool) {
 }
 
 // Iter returns an iterator over the resources.
-func (pd PrimaryData) Iter() iter.Seq[Resource] {
-	return func(yield func(Resource) bool) {
+func (pd PrimaryData) Iter() iter.Seq[*Resource] {
+	return func(yield func(*Resource) bool) {
 		if resource, ok := pd.One(); ok {
-			yield(resource)
+			yield(&resource)
 		} else if resources, ok := pd.Many(); ok {
 			for _, resource := range resources {
-				if !yield(resource) {
+				if !yield(&resource) {
 					return
 				}
 			}

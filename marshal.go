@@ -15,6 +15,38 @@ type MarshalOptions struct {
 	includeRelated bool
 }
 
+// WithMarshaler uses a custom JSON marshaler to serialize documents.
+func WithMarshaler(fn func(interface{}) ([]byte, error)) func(*MarshalOptions) {
+	return func(opts *MarshalOptions) {
+		opts.marshaler = fn
+	}
+}
+
+// SparseFieldsets returns a function that modifies [MarshalOptions] to apply sparse fieldsets to resources.
+// The function takes a resourceType string to identify which resources to modify and a fields slice containing
+// the field names to include in the output. When applied, this function will filter both the primary data
+// and included resources to only include the specified fields for resources matching the given type.
+func SparseFieldsets(resourceType string, fields []string) func(*MarshalOptions) {
+	return func(mo *MarshalOptions) {
+		mo.modifyDocument = append(mo.modifyDocument, func(d *Document) {
+			if d.Data.Null() {
+				return
+			}
+			for resource := range d.Data.Iter() {
+				if resource.Type == resourceType {
+					resource.ApplySparseFieldsets(fields)
+				}
+			}
+			for i, resource := range d.Included {
+				if resource.Type == resourceType {
+					resource.ApplySparseFieldsets(fields)
+					d.Included[i] = resource
+				}
+			}
+		})
+	}
+}
+
 // DocumentMeta returns a function that modifies MarshalOptions to add metadata to the JSON:API document.
 // The provided meta map will be set as the top-level meta object in the resulting document.
 // This is useful for adding custom metadata like pagination info or document-level statistics.
@@ -34,13 +66,6 @@ func DocumentLinks(links map[string]Link) func(*MarshalOptions) {
 		mo.modifyDocument = append(mo.modifyDocument, func(d *Document) {
 			d.Links = links
 		})
-	}
-}
-
-// WithMarshaler uses a custom JSON marshaler to serialize documents.
-func WithMarshaler(fn func(interface{}) ([]byte, error)) func(*MarshalOptions) {
-	return func(opts *MarshalOptions) {
-		opts.marshaler = fn
 	}
 }
 

@@ -92,7 +92,7 @@ func TestPrimaryData_Iter(t *testing.T) {
 
 		var collected []Resource
 		for r := range data.Iter() {
-			collected = append(collected, r)
+			collected = append(collected, *r)
 		}
 
 		assert.Len(t, collected, 1)
@@ -108,7 +108,7 @@ func TestPrimaryData_Iter(t *testing.T) {
 
 		var collected []Resource
 		for r := range data.Iter() {
-			collected = append(collected, r)
+			collected = append(collected, *r)
 		}
 
 		assert.Len(t, collected, 2)
@@ -120,7 +120,7 @@ func TestPrimaryData_Iter(t *testing.T) {
 
 		var collected []Resource
 		for r := range data.Iter() {
-			collected = append(collected, r)
+			collected = append(collected, *r)
 		}
 
 		assert.Len(t, collected, 0)
