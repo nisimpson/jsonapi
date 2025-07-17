@@ -29,6 +29,10 @@ A comprehensive Go library for marshaling Go structs into JSON:API compliant res
 go get github.com/nisimpson/jsonapi
 ```
 
+### Requirements
+
+- Go 1.23 or higher
+
 ## Basic Usage
 
 ### Marshaling

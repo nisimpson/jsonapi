@@ -3,6 +3,7 @@ package jsonapi
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -523,4 +524,507 @@ func TestCustomMarshaler(t *testing.T) {
 	assert.Equal(t, "custom", resourceData.Type)
 	assert.Equal(t, "John Doe", resourceData.Attributes["name"])
 	assert.Equal(t, "john@example.com", resourceData.Attributes["email"])
+}
+
+// TestSparseFieldsets tests the SparseFieldsets option function
+func TestSparseFieldsets(t *testing.T) {
+	t.Run("single resource", func(t *testing.T) {
+		// Create a test resource
+		user := struct {
+			ID       string `jsonapi:"primary,users"`
+			Name     string `jsonapi:"attr,name"`
+			Email    string `jsonapi:"attr,email"`
+			Password string `jsonapi:"attr,password"`
+		}{
+			ID:       "1",
+			Name:     "John Doe",
+			Email:    "john@example.com",
+			Password: "secret",
+		}
+
+		// Marshal with sparse fieldsets
+		data, err := Marshal(user, SparseFieldsets("users", []string{"name", "email"}))
+		require.NoError(t, err)
+
+		// Unmarshal to verify
+		var doc Document
+		err = json.Unmarshal(data, &doc)
+		require.NoError(t, err)
+
+		// Verify only the specified fields are included
+		resource, ok := doc.Data.One()
+		require.True(t, ok)
+		assert.Equal(t, "1", resource.ID)
+		assert.Equal(t, "users", resource.Type)
+		assert.Equal(t, 2, len(resource.Attributes))
+		assert.Contains(t, resource.Attributes, "name")
+		assert.Contains(t, resource.Attributes, "email")
+		assert.NotContains(t, resource.Attributes, "password")
+	})
+
+	t.Run("multiple resources", func(t *testing.T) {
+		// Create test resources
+		users := []struct {
+			ID       string `jsonapi:"primary,users"`
+			Name     string `jsonapi:"attr,name"`
+			Email    string `jsonapi:"attr,email"`
+			Password string `jsonapi:"attr,password"`
+		}{
+			{
+				ID:       "1",
+				Name:     "John Doe",
+				Email:    "john@example.com",
+				Password: "secret1",
+			},
+			{
+				ID:       "2",
+				Name:     "Jane Smith",
+				Email:    "jane@example.com",
+				Password: "secret2",
+			},
+		}
+
+		// Marshal with sparse fieldsets
+		data, err := Marshal(users, SparseFieldsets("users", []string{"name"}))
+		require.NoError(t, err)
+
+		// Unmarshal to verify
+		var doc Document
+		err = json.Unmarshal(data, &doc)
+		require.NoError(t, err)
+
+		// Verify only the specified fields are included
+		resources, ok := doc.Data.Many()
+		require.True(t, ok)
+		require.Len(t, resources, 2)
+
+		for _, resource := range resources {
+			assert.Equal(t, "users", resource.Type)
+			assert.Equal(t, 1, len(resource.Attributes))
+			assert.Contains(t, resource.Attributes, "name")
+			assert.NotContains(t, resource.Attributes, "email")
+			assert.NotContains(t, resource.Attributes, "password")
+		}
+	})
+
+	t.Run("with included resources", func(t *testing.T) {
+		// Create a test resource with relationships
+		type Post struct {
+			ID      string `jsonapi:"primary,posts"`
+			Title   string `jsonapi:"attr,title"`
+			Content string `jsonapi:"attr,content"`
+		}
+
+		type User struct {
+			ID    string `jsonapi:"primary,users"`
+			Name  string `jsonapi:"attr,name"`
+			Email string `jsonapi:"attr,email"`
+			Posts []Post `jsonapi:"relation,posts"`
+		}
+
+		user := User{
+			ID:    "1",
+			Name:  "John Doe",
+			Email: "john@example.com",
+			Posts: []Post{
+				{
+					ID:      "101",
+					Title:   "First Post",
+					Content: "This is my first post",
+				},
+				{
+					ID:      "102",
+					Title:   "Second Post",
+					Content: "This is my second post",
+				},
+			},
+		}
+
+		// Marshal with sparse fieldsets for both resource types
+		data, err := Marshal(user,
+			IncludeRelatedResources(),
+			SparseFieldsets("users", []string{"name"}),
+			SparseFieldsets("posts", []string{"title"}),
+		)
+		require.NoError(t, err)
+
+		// Unmarshal to verify
+		var doc Document
+		err = json.Unmarshal(data, &doc)
+		require.NoError(t, err)
+
+		// Verify primary resource has only specified fields
+		resource, ok := doc.Data.One()
+		require.True(t, ok)
+		assert.Equal(t, "1", resource.ID)
+		assert.Equal(t, "users", resource.Type)
+		assert.Equal(t, 1, len(resource.Attributes))
+		assert.Contains(t, resource.Attributes, "name")
+		assert.NotContains(t, resource.Attributes, "email")
+
+		// Verify included resources have only specified fields
+		require.Len(t, doc.Included, 2)
+		for _, included := range doc.Included {
+			assert.Equal(t, "posts", included.Type)
+			assert.Equal(t, 1, len(included.Attributes))
+			assert.Contains(t, included.Attributes, "title")
+			assert.NotContains(t, included.Attributes, "content")
+		}
+	})
+
+	t.Run("null resource", func(t *testing.T) {
+		// Create a document with null resource
+		doc := Document{
+			Data: NullResource(),
+		}
+
+		// Apply sparse fieldsets
+		opts := &MarshalOptions{}
+		sparseFieldsets := SparseFieldsets("users", []string{"name", "email"})
+		sparseFieldsets(opts)
+
+		// Apply the document modification
+		for _, modifyDoc := range opts.modifyDocument {
+			modifyDoc(&doc)
+		}
+
+		// Verify the document is still null
+		assert.True(t, doc.Data.Null())
+	})
+
+	t.Run("non-matching resource type", func(t *testing.T) {
+		// Create a test resource
+		post := struct {
+			ID      string `jsonapi:"primary,posts"`
+			Title   string `jsonapi:"attr,title"`
+			Content string `jsonapi:"attr,content"`
+		}{
+			ID:      "1",
+			Title:   "Hello World",
+			Content: "This is a test post",
+		}
+
+		// Marshal with sparse fieldsets for a different resource type
+		data, err := Marshal(post, SparseFieldsets("users", []string{"name", "email"}))
+		require.NoError(t, err)
+
+		// Unmarshal to verify
+		var doc Document
+		err = json.Unmarshal(data, &doc)
+		require.NoError(t, err)
+
+		// Verify all fields are included since the resource type doesn't match
+		resource, ok := doc.Data.One()
+		require.True(t, ok)
+		assert.Equal(t, "1", resource.ID)
+		assert.Equal(t, "posts", resource.Type)
+		assert.Equal(t, 2, len(resource.Attributes))
+		assert.Contains(t, resource.Attributes, "title")
+		assert.Contains(t, resource.Attributes, "content")
+	})
+}
+
+// Create a custom marshaler
+type CustomUser struct {
+	ID    string
+	Name  string
+	Email string
+}
+
+// Implement ResourceMarshaler interface
+func (u *CustomUser) MarshalJSONAPIResource(ctx context.Context) (Resource, error) {
+	return Resource{
+		ID:   u.ID,
+		Type: "custom_users",
+		Attributes: map[string]interface{}{
+			"name":  u.Name,
+			"email": u.Email,
+		},
+	}, nil
+}
+
+// TestMarshalSingle tests the marshalSingle function
+func TestMarshalSingle(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("custom marshaler", func(t *testing.T) {
+
+		// Create a user
+		user := &CustomUser{
+			ID:    "1",
+			Name:  "John Doe",
+			Email: "john@example.com",
+		}
+
+		// Marshal the user
+		resource, _, err := marshalSingle(ctx, user)
+		require.NoError(t, err)
+
+		// Verify the resource
+		assert.Equal(t, "1", resource.ID)
+		assert.Equal(t, "custom_users", resource.Type)
+		assert.Equal(t, "John Doe", resource.Attributes["name"])
+		assert.Equal(t, "john@example.com", resource.Attributes["email"])
+	})
+
+	t.Run("nil value", func(t *testing.T) {
+		// Marshal nil value
+		resource, _, err := marshalSingle(ctx, nil)
+		require.Error(t, err)
+		assert.Equal(t, Resource{}, resource)
+	})
+
+	t.Run("invalid value", func(t *testing.T) {
+		// Marshal invalid value (not a struct)
+		value := "not a struct"
+		resource, _, err := marshalSingle(ctx, value)
+		require.Error(t, err)
+		assert.Equal(t, Resource{}, resource)
+	})
+
+	t.Run("struct with no jsonapi tags", func(t *testing.T) {
+		// Create a struct with no jsonapi tags
+		type NoTags struct {
+			ID   string
+			Name string
+		}
+
+		// Create an instance
+		noTags := NoTags{
+			ID:   "1",
+			Name: "John Doe",
+		}
+
+		// Marshal the struct
+		resource, _, err := marshalSingle(ctx, noTags)
+		require.NoError(t, err)
+		assert.Equal(t, Resource{
+			Attributes:    make(map[string]interface{}),
+			Relationships: make(map[string]Relationship),
+		}, resource)
+	})
+
+	t.Run("struct with embedded fields", func(t *testing.T) {
+		// Create a base struct
+		type Base struct {
+			ID string `jsonapi:"primary,users"`
+		}
+
+		// Create a derived struct with embedded fields
+		type User struct {
+			Base
+			Name  string `jsonapi:"attr,name"`
+			Email string `jsonapi:"attr,email"`
+		}
+
+		// Create an instance
+		user := User{
+			Base:  Base{ID: "1"},
+			Name:  "John Doe",
+			Email: "john@example.com",
+		}
+
+		// Marshal the struct
+		resource, _, err := marshalSingle(ctx, user)
+		require.NoError(t, err)
+
+		// Verify the resource
+		assert.Equal(t, "1", resource.ID)
+		assert.Equal(t, "users", resource.Type)
+		assert.Equal(t, "John Doe", resource.Attributes["name"])
+		assert.Equal(t, "john@example.com", resource.Attributes["email"])
+	})
+}
+
+// Create a struct that implements RelationshipLinksMarshaler
+type CustomRelationshipLinksUser struct {
+	ID    string `jsonapi:"primary,users"`
+	Name  string `jsonapi:"attr,name"`
+	Posts []struct {
+		ID string `jsonapi:"primary,posts"`
+	} `jsonapi:"relation,posts"`
+}
+
+// Implement RelationshipLinksMarshaler interface
+func (u *CustomRelationshipLinksUser) MarshalJSONAPIRelationshipLinks(ctx context.Context, name string) (map[string]Link, error) {
+	if name == "posts" {
+		return map[string]Link{
+			"self":    {Href: "/users/" + u.ID + "/relationships/posts"},
+			"related": {Href: "/users/" + u.ID + "/posts"},
+		}, nil
+	}
+	return nil, nil
+}
+
+// Create a struct that implements RelationshipMetaMarshaler
+type CustomRelationshipMetaUser struct {
+	ID    string `jsonapi:"primary,users"`
+	Name  string `jsonapi:"attr,name"`
+	Posts []struct {
+		ID string `jsonapi:"primary,posts"`
+	} `jsonapi:"relation,posts"`
+}
+
+// Implement RelationshipMetaMarshaler interface
+func (u *CustomRelationshipMetaUser) MarshalJSONAPIRelationshipMeta(ctx context.Context, name string) (map[string]interface{}, error) {
+	if name == "posts" {
+		return map[string]interface{}{
+			"count": len(u.Posts),
+		}, nil
+	}
+	return nil, nil
+}
+
+// TestMarshalRelationship tests the marshalRelationship function
+func TestMarshalRelationship(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("to-one relationship", func(t *testing.T) {
+		// Create a related struct
+		type Profile struct {
+			ID  string `jsonapi:"primary,profiles"`
+			Bio string `jsonapi:"attr,bio"`
+		}
+
+		// Create an instance
+		profile := Profile{
+			ID:  "101",
+			Bio: "Software developer",
+		}
+
+		// Marshal the relationship
+		rel, _, err := marshalRelationship(ctx, reflect.ValueOf(profile), []string{"profile"})
+		require.NoError(t, err)
+
+		// Verify the relationship
+		assert.False(t, rel.Data.Null())
+		resource, ok := rel.Data.One()
+		require.True(t, ok)
+		assert.Equal(t, "101", resource.ID)
+		assert.Equal(t, "profiles", resource.Type)
+	})
+
+	t.Run("to-many relationship", func(t *testing.T) {
+		// Create a related struct
+		type Post struct {
+			ID      string `jsonapi:"primary,posts"`
+			Title   string `jsonapi:"attr,title"`
+			Content string `jsonapi:"attr,content"`
+		}
+
+		// Create instances
+		posts := []Post{
+			{
+				ID:      "101",
+				Title:   "First Post",
+				Content: "Content 1",
+			},
+			{
+				ID:      "102",
+				Title:   "Second Post",
+				Content: "Content 2",
+			},
+		}
+
+		// Marshal the relationship
+		rel, _, err := marshalRelationship(ctx, reflect.ValueOf(posts), []string{"posts"})
+		require.NoError(t, err)
+
+		// Verify the relationship
+		assert.False(t, rel.Data.Null())
+		resources, ok := rel.Data.Many()
+		require.True(t, ok)
+		require.Len(t, resources, 2)
+		assert.Equal(t, "101", resources[0].ID)
+		assert.Equal(t, "posts", resources[0].Type)
+		assert.Equal(t, "102", resources[1].ID)
+		assert.Equal(t, "posts", resources[1].Type)
+	})
+
+	t.Run("nil relationship", func(t *testing.T) {
+		// Create a nil pointer
+		var profile *struct {
+			ID string `jsonapi:"primary,profiles"`
+		}
+
+		// Marshal the relationship
+		rel, _, err := marshalRelationship(ctx, reflect.ValueOf(profile), []string{"profile"})
+		require.NoError(t, err)
+
+		// Verify the relationship has null data
+		assert.True(t, rel.Data.Null())
+	})
+
+	t.Run("empty slice relationship", func(t *testing.T) {
+		// Create an empty slice
+		var posts []struct {
+			ID string `jsonapi:"primary,posts"`
+		}
+
+		// Marshal the relationship
+		rel, _, err := marshalRelationship(ctx, reflect.ValueOf(posts), []string{"posts"})
+		require.NoError(t, err)
+
+		// Verify the relationship has empty array data
+		resources, ok := rel.Data.Many()
+		require.True(t, ok)
+		assert.Empty(t, resources)
+	})
+}
+
+// TestIsSlice tests the isSlice function
+func TestIsSlice(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    interface{}
+		expected bool
+	}{
+		{
+			name:     "nil",
+			value:    nil,
+			expected: false,
+		},
+		{
+			name:     "string",
+			value:    "not a slice",
+			expected: false,
+		},
+		{
+			name:     "int",
+			value:    42,
+			expected: false,
+		},
+		{
+			name:     "struct",
+			value:    struct{}{},
+			expected: false,
+		},
+		{
+			name:     "slice",
+			value:    []string{"a", "b", "c"},
+			expected: true,
+		},
+		{
+			name:     "empty slice",
+			value:    []int{},
+			expected: true,
+		},
+		{
+			name:     "array",
+			value:    [3]int{1, 2, 3},
+			expected: false, // Arrays are not slices
+		},
+		{
+			name:     "map",
+			value:    map[string]int{"a": 1},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isSlice(tt.value)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }

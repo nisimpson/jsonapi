@@ -2,6 +2,7 @@ package jsonapi
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -816,4 +817,29 @@ func TestConvertToBool(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestWithUnmarshaler tests the WithUnmarshaler option function
+func TestWithUnmarshaler(t *testing.T) {
+	// Create a custom unmarshaler function
+	customUnmarshaler := func(data []byte, v interface{}) error {
+		// Just a simple test implementation
+		return json.Unmarshal(data, v)
+	}
+
+	// Create options with the custom unmarshaler
+	opts := &UnmarshalOptions{}
+	withUnmarshaler := WithUnmarshaler(customUnmarshaler)
+	withUnmarshaler(opts)
+
+	// Verify the unmarshaler was set correctly
+	assert.NotNil(t, opts.unmarshaler)
+
+	// Test the unmarshaler with some data
+	data := []byte(`{"test": "value"}`)
+	var result map[string]interface{}
+
+	err := opts.unmarshaler(data, &result)
+	require.NoError(t, err)
+	assert.Equal(t, "value", result["test"])
 }

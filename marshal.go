@@ -308,16 +308,19 @@ func marshalRelationship(ctx context.Context, fieldValue reflect.Value, options 
 	rel := Relationship{}
 	var included []Resource
 
+	// Zero values that are not slices...
 	if isZeroValue(fieldValue) {
 		if contains(options, "omitempty") {
 			return rel, nil, nil
 		}
-		rel.Data = NullResource()
-		return rel, nil, nil
+		if fieldValue.Kind() != reflect.Slice {
+			rel.Data = NullResource()
+			return rel, nil, nil
+		}
 	}
 
+	// Handle slice relationships
 	if fieldValue.Kind() == reflect.Slice {
-		// Handle slice relationships
 		var resources []Resource
 		for i := 0; i < fieldValue.Len(); i++ {
 			elem := fieldValue.Index(i).Interface()

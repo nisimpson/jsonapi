@@ -39,7 +39,7 @@ func TestResource(t *testing.T) {
 	assert.Equal(t, "users", resource.Type)
 	assert.Equal(t, "John Doe", resource.Attributes["name"])
 	assert.Equal(t, "john@example.com", resource.Attributes["email"])
-	
+
 	// Verify relationships
 	relationship, ok := resource.Relationships["posts"]
 	require.True(t, ok)
@@ -50,10 +50,10 @@ func TestResource(t *testing.T) {
 	assert.Equal(t, "posts", resources[0].Type)
 	assert.Equal(t, "102", resources[1].ID)
 	assert.Equal(t, "posts", resources[1].Type)
-	
+
 	// Verify links
 	assert.Equal(t, "/users/1", resource.Links["self"].Href)
-	
+
 	// Verify meta
 	assert.Equal(t, "2023-01-01T00:00:00Z", resource.Meta["created_at"])
 }
@@ -73,12 +73,12 @@ func TestPrimaryData(t *testing.T) {
 		resource := Resource{ID: "1", Type: "users"}
 		data := SingleResource(resource)
 		assert.False(t, data.Null())
-		
+
 		one, ok := data.One()
 		assert.True(t, ok)
 		assert.Equal(t, "1", one.ID)
 		assert.Equal(t, "users", one.Type)
-		
+
 		_, ok = data.Many()
 		assert.False(t, ok)
 	})
@@ -90,10 +90,10 @@ func TestPrimaryData(t *testing.T) {
 		}
 		data := MultiResource(resources...)
 		assert.False(t, data.Null())
-		
+
 		_, ok := data.One()
 		assert.False(t, ok)
-		
+
 		many, ok := data.Many()
 		assert.True(t, ok)
 		require.Len(t, many, 2)
@@ -185,7 +185,7 @@ func TestPrimaryData_Iter(t *testing.T) {
 				// Dereference the pointer and make a copy
 				resources = append(resources, *resourcePtr)
 			}
-			
+
 			// Verify the resources match the expected ones
 			assert.Equal(t, tt.expected, resources)
 		})
@@ -201,7 +201,7 @@ func TestPrimaryData_Iter_EarlyTermination(t *testing.T) {
 		Resource{ID: "3", Type: "users"},
 		Resource{ID: "4", Type: "users"},
 	)
-	
+
 	// Test early termination by breaking after the second resource
 	var resources []Resource
 	count := 0
@@ -213,7 +213,7 @@ func TestPrimaryData_Iter_EarlyTermination(t *testing.T) {
 			break
 		}
 	}
-	
+
 	// Verify only the first two resources were collected
 	assert.Len(t, resources, 2)
 	assert.Equal(t, "1", resources[0].ID)
@@ -234,11 +234,11 @@ func TestPrimaryData_MarshalJSON(t *testing.T) {
 		data := SingleResource(resource)
 		jsonData, err := json.Marshal(data)
 		require.NoError(t, err)
-		
+
 		var result map[string]interface{}
 		err = json.Unmarshal(jsonData, &result)
 		require.NoError(t, err)
-		
+
 		assert.Equal(t, "1", result["id"])
 		assert.Equal(t, "users", result["type"])
 	})
@@ -251,11 +251,11 @@ func TestPrimaryData_MarshalJSON(t *testing.T) {
 		data := MultiResource(resources...)
 		jsonData, err := json.Marshal(data)
 		require.NoError(t, err)
-		
+
 		var result []map[string]interface{}
 		err = json.Unmarshal(jsonData, &result)
 		require.NoError(t, err)
-		
+
 		require.Len(t, result, 2)
 		assert.Equal(t, "1", result[0]["id"])
 		assert.Equal(t, "users", result[0]["type"])
@@ -279,7 +279,7 @@ func TestPrimaryData_UnmarshalJSON(t *testing.T) {
 		var data PrimaryData
 		err := json.Unmarshal(jsonData, &data)
 		require.NoError(t, err)
-		
+
 		resource, ok := data.One()
 		require.True(t, ok)
 		assert.Equal(t, "1", resource.ID)
@@ -291,7 +291,7 @@ func TestPrimaryData_UnmarshalJSON(t *testing.T) {
 		var data PrimaryData
 		err := json.Unmarshal(jsonData, &data)
 		require.NoError(t, err)
-		
+
 		resources, ok := data.Many()
 		require.True(t, ok)
 		require.Len(t, resources, 2)
@@ -347,7 +347,7 @@ func TestLink_MarshalJSON(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			data, err := json.Marshal(tt.link)
 			require.NoError(t, err)
-			
+
 			// For object comparison, we need to normalize the JSON
 			if tt.expected[0] == '{' {
 				var expected, actual interface{}
@@ -406,9 +406,9 @@ func TestLink_UnmarshalJSON(t *testing.T) {
 			var link Link
 			err := json.Unmarshal([]byte(tt.json), &link)
 			require.NoError(t, err)
-			
+
 			assert.Equal(t, tt.expected.Href, link.Href)
-			
+
 			if tt.expected.Meta == nil {
 				assert.Nil(t, link.Meta)
 			} else {
