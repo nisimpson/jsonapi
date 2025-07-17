@@ -31,7 +31,7 @@ go get github.com/nisimpson/jsonapi
 
 ### Requirements
 
-- Go 1.23 or higher
+- Go 1.24.4 or higher
 
 ## Basic Usage
 

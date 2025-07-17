@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"sync/atomic"
 	"testing"
 
 	"github.com/nisimpson/jsonapi"
@@ -141,8 +142,11 @@ func TestGetRequestContext(t *testing.T) {
 		assert.Nil(t, retrieved)
 	})
 
+	// testContextKey is a custom type for test context keys to avoid collisions
+	type testContextKey string
+
 	t.Run("returns false when context has different key", func(t *testing.T) {
-		ctx := context.WithValue(context.Background(), "other-key", "some-value")
+		ctx := context.WithValue(context.Background(), testContextKey("other-key"), "some-value")
 		retrieved, ok := server.GetRequestContext(ctx)
 
 		assert.False(t, ok)
@@ -1436,9 +1440,9 @@ func TestEdgeCases(t *testing.T) {
 
 func TestConcurrency(t *testing.T) {
 	t.Run("concurrent requests to same handler", func(t *testing.T) {
-		callCount := 0
+		var callCount atomic.Int64
 		handler := server.HandlerFunc(func(ctx *server.RequestContext, r *http.Request) (server.Response, error) {
-			callCount++
+			callCount.Add(1)
 			return server.Response{Status: http.StatusOK}, nil
 		})
 
@@ -1464,7 +1468,7 @@ func TestConcurrency(t *testing.T) {
 			<-done
 		}
 
-		assert.Equal(t, numRequests, callCount)
+		assert.Equal(t, int64(numRequests), callCount.Load())
 	})
 
 	t.Run("concurrent context operations", func(t *testing.T) {
