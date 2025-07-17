@@ -1,14 +1,13 @@
-linters-settings:
-  staticcheck:
-    go: "1.23"
-    checks: ["all"]
+run:
+  go: "1.24.4"
+  issues:
+    exclude-dirs:
+      - vendor/
 
 linters:
   enable:
     - staticcheck
 
-run:
-  deadline: 5m
-  tests: true
-  skip-dirs:
-    - vendor/
+issues:
+  include:
+    - "all"
