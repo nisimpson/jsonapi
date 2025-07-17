@@ -107,14 +107,37 @@ func (pd PrimaryData) Many() ([]Resource, bool) {
 	return nil, false
 }
 
+func (pd *PrimaryData) applySparseFieldsets(resourceType string, fields []string) {
+	if pd.Null() {
+		return
+	}
+	if resource, ok := pd.data.(Resource); ok && resource.Type == resourceType {
+		resource.ApplySparseFieldsets(fields)
+		return
+	}
+
+	if items, ok := pd.data.([]Resource); ok {
+		for i, item := range items {
+			if item.Type == resourceType {
+				item.ApplySparseFieldsets(fields)
+			}
+			items[i] = item
+		}
+		pd.data = items
+	}
+}
+
 // Iter returns an iterator over the resources.
-func (pd PrimaryData) Iter() iter.Seq[*Resource] {
+func (pd *PrimaryData) Iter() iter.Seq[*Resource] {
 	return func(yield func(*Resource) bool) {
-		if resource, ok := pd.One(); ok {
+		if resource, ok := pd.data.(Resource); ok {
 			yield(&resource)
-		} else if resources, ok := pd.Many(); ok {
-			for _, resource := range resources {
-				if !yield(&resource) {
+			pd.data = resource
+		} else if resources, ok := pd.data.([]Resource); ok {
+			for i, resource := range resources {
+				next := yield(&resource)
+				resources[i] = resource
+				if !next {
 					return
 				}
 			}

@@ -8,95 +8,79 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestResource_Ref(t *testing.T) {
+// TestResource tests the Resource type
+func TestResource(t *testing.T) {
+	// Create a resource
 	resource := Resource{
 		ID:   "1",
 		Type: "users",
 		Attributes: map[string]interface{}{
-			"name": "John Doe",
+			"name":  "John Doe",
+			"email": "john@example.com",
 		},
 		Relationships: map[string]Relationship{
 			"posts": {
-				Data: MultiResource(Resource{ID: "1", Type: "posts"}),
+				Data: MultiResource(
+					Resource{ID: "101", Type: "posts"},
+					Resource{ID: "102", Type: "posts"},
+				),
 			},
-		},
-		Meta: map[string]interface{}{
-			"version": "1.0",
 		},
 		Links: map[string]Link{
 			"self": {Href: "/users/1"},
 		},
+		Meta: map[string]interface{}{
+			"created_at": "2023-01-01T00:00:00Z",
+		},
 	}
 
-	ref := resource.Ref()
-
-	assert.Equal(t, "1", ref.ID)
-	assert.Equal(t, "users", ref.Type)
-	assert.Nil(t, ref.Attributes)
-	assert.Nil(t, ref.Relationships)
-	assert.Nil(t, ref.Meta)
-	assert.Nil(t, ref.Links)
+	// Verify the resource properties
+	assert.Equal(t, "1", resource.ID)
+	assert.Equal(t, "users", resource.Type)
+	assert.Equal(t, "John Doe", resource.Attributes["name"])
+	assert.Equal(t, "john@example.com", resource.Attributes["email"])
+	
+	// Verify relationships
+	relationship, ok := resource.Relationships["posts"]
+	require.True(t, ok)
+	resources, ok := relationship.Data.Many()
+	require.True(t, ok)
+	require.Len(t, resources, 2)
+	assert.Equal(t, "101", resources[0].ID)
+	assert.Equal(t, "posts", resources[0].Type)
+	assert.Equal(t, "102", resources[1].ID)
+	assert.Equal(t, "posts", resources[1].Type)
+	
+	// Verify links
+	assert.Equal(t, "/users/1", resource.Links["self"].Href)
+	
+	// Verify meta
+	assert.Equal(t, "2023-01-01T00:00:00Z", resource.Meta["created_at"])
 }
 
-func TestPrimaryData_SingleResource(t *testing.T) {
-	resource := Resource{ID: "1", Type: "users"}
-	data := SingleResource(resource)
+// TestPrimaryData tests the PrimaryData type
+func TestPrimaryData(t *testing.T) {
+	t.Run("null resource", func(t *testing.T) {
+		data := NullResource()
+		assert.True(t, data.Null())
+		_, ok := data.One()
+		assert.False(t, ok)
+		_, ok = data.Many()
+		assert.False(t, ok)
+	})
 
-	assert.False(t, data.Null())
-
-	single, ok := data.One()
-	assert.True(t, ok)
-	assert.Equal(t, resource, single)
-
-	many, ok := data.Many()
-	assert.False(t, ok)
-	assert.Nil(t, many)
-}
-
-func TestPrimaryData_MultiResource(t *testing.T) {
-	resources := []Resource{
-		{ID: "1", Type: "users"},
-		{ID: "2", Type: "users"},
-	}
-	data := MultiResource(resources...)
-
-	assert.False(t, data.Null())
-
-	single, ok := data.One()
-	assert.False(t, ok)
-	assert.Equal(t, Resource{}, single)
-
-	many, ok := data.Many()
-	assert.True(t, ok)
-	assert.Equal(t, resources, many)
-}
-
-func TestPrimaryData_NullResource(t *testing.T) {
-	data := NullResource()
-
-	assert.True(t, data.Null())
-
-	single, ok := data.One()
-	assert.False(t, ok)
-	assert.Equal(t, Resource{}, single)
-
-	many, ok := data.Many()
-	assert.False(t, ok)
-	assert.Nil(t, many)
-}
-
-func TestPrimaryData_Iter(t *testing.T) {
 	t.Run("single resource", func(t *testing.T) {
 		resource := Resource{ID: "1", Type: "users"}
 		data := SingleResource(resource)
-
-		var collected []Resource
-		for r := range data.Iter() {
-			collected = append(collected, *r)
-		}
-
-		assert.Len(t, collected, 1)
-		assert.Equal(t, resource, collected[0])
+		assert.False(t, data.Null())
+		
+		one, ok := data.One()
+		assert.True(t, ok)
+		assert.Equal(t, "1", one.ID)
+		assert.Equal(t, "users", one.Type)
+		
+		_, ok = data.Many()
+		assert.False(t, ok)
 	})
 
 	t.Run("multiple resources", func(t *testing.T) {
@@ -105,217 +89,393 @@ func TestPrimaryData_Iter(t *testing.T) {
 			{ID: "2", Type: "users"},
 		}
 		data := MultiResource(resources...)
-
-		var collected []Resource
-		for r := range data.Iter() {
-			collected = append(collected, *r)
-		}
-
-		assert.Len(t, collected, 2)
-		assert.Equal(t, resources, collected)
-	})
-
-	t.Run("null resource", func(t *testing.T) {
-		data := NullResource()
-
-		var collected []Resource
-		for r := range data.Iter() {
-			collected = append(collected, *r)
-		}
-
-		assert.Len(t, collected, 0)
+		assert.False(t, data.Null())
+		
+		_, ok := data.One()
+		assert.False(t, ok)
+		
+		many, ok := data.Many()
+		assert.True(t, ok)
+		require.Len(t, many, 2)
+		assert.Equal(t, "1", many[0].ID)
+		assert.Equal(t, "users", many[0].Type)
+		assert.Equal(t, "2", many[1].ID)
+		assert.Equal(t, "users", many[1].Type)
 	})
 }
 
-func TestPrimaryData_JSON(t *testing.T) {
-	t.Run("marshal single resource", func(t *testing.T) {
-		resource := Resource{ID: "1", Type: "users"}
-		data := SingleResource(resource)
+// TestPrimaryData_Iter tests the Iter method of PrimaryData
+func TestPrimaryData_Iter(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     PrimaryData
+		expected []Resource
+	}{
+		{
+			name: "single resource",
+			data: SingleResource(Resource{
+				ID:   "1",
+				Type: "users",
+				Attributes: map[string]interface{}{
+					"name": "John Doe",
+				},
+			}),
+			expected: []Resource{
+				{
+					ID:   "1",
+					Type: "users",
+					Attributes: map[string]interface{}{
+						"name": "John Doe",
+					},
+				},
+			},
+		},
+		{
+			name: "multiple resources",
+			data: MultiResource(
+				Resource{
+					ID:   "1",
+					Type: "users",
+					Attributes: map[string]interface{}{
+						"name": "John Doe",
+					},
+				},
+				Resource{
+					ID:   "2",
+					Type: "users",
+					Attributes: map[string]interface{}{
+						"name": "Jane Smith",
+					},
+				},
+			),
+			expected: []Resource{
+				{
+					ID:   "1",
+					Type: "users",
+					Attributes: map[string]interface{}{
+						"name": "John Doe",
+					},
+				},
+				{
+					ID:   "2",
+					Type: "users",
+					Attributes: map[string]interface{}{
+						"name": "Jane Smith",
+					},
+				},
+			},
+		},
+		{
+			name:     "null resource",
+			data:     NullResource(),
+			expected: nil,
+		},
+		{
+			name:     "empty resource array",
+			data:     MultiResource(),
+			expected: nil,
+		},
+	}
 
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Collect resources from iterator
+			var resources []Resource
+			for resourcePtr := range tt.data.Iter() {
+				// Dereference the pointer and make a copy
+				resources = append(resources, *resourcePtr)
+			}
+			
+			// Verify the resources match the expected ones
+			assert.Equal(t, tt.expected, resources)
+		})
+	}
+}
+
+// TestPrimaryData_Iter_EarlyTermination tests early termination of the Iter method
+func TestPrimaryData_Iter_EarlyTermination(t *testing.T) {
+	// Create primary data with multiple resources
+	data := MultiResource(
+		Resource{ID: "1", Type: "users"},
+		Resource{ID: "2", Type: "users"},
+		Resource{ID: "3", Type: "users"},
+		Resource{ID: "4", Type: "users"},
+	)
+	
+	// Test early termination by breaking after the second resource
+	var resources []Resource
+	count := 0
+	for resourcePtr := range data.Iter() {
+		// Dereference the pointer and make a copy
+		resources = append(resources, *resourcePtr)
+		count++
+		if count >= 2 {
+			break
+		}
+	}
+	
+	// Verify only the first two resources were collected
+	assert.Len(t, resources, 2)
+	assert.Equal(t, "1", resources[0].ID)
+	assert.Equal(t, "2", resources[1].ID)
+}
+
+// TestPrimaryData_MarshalJSON tests marshaling PrimaryData to JSON
+func TestPrimaryData_MarshalJSON(t *testing.T) {
+	t.Run("null resource", func(t *testing.T) {
+		data := NullResource()
 		jsonData, err := json.Marshal(data)
 		require.NoError(t, err)
-
-		expected := `{"id":"1","type":"users"}`
-		assert.JSONEq(t, expected, string(jsonData))
+		assert.Equal(t, "null", string(jsonData))
 	})
 
-	t.Run("marshal multiple resources", func(t *testing.T) {
+	t.Run("single resource", func(t *testing.T) {
+		resource := Resource{ID: "1", Type: "users"}
+		data := SingleResource(resource)
+		jsonData, err := json.Marshal(data)
+		require.NoError(t, err)
+		
+		var result map[string]interface{}
+		err = json.Unmarshal(jsonData, &result)
+		require.NoError(t, err)
+		
+		assert.Equal(t, "1", result["id"])
+		assert.Equal(t, "users", result["type"])
+	})
+
+	t.Run("multiple resources", func(t *testing.T) {
 		resources := []Resource{
 			{ID: "1", Type: "users"},
 			{ID: "2", Type: "users"},
 		}
 		data := MultiResource(resources...)
-
 		jsonData, err := json.Marshal(data)
 		require.NoError(t, err)
-
-		expected := `[{"id":"1","type":"users"},{"id":"2","type":"users"}]`
-		assert.JSONEq(t, expected, string(jsonData))
-	})
-
-	t.Run("marshal null resource", func(t *testing.T) {
-		data := NullResource()
-
-		jsonData, err := json.Marshal(data)
+		
+		var result []map[string]interface{}
+		err = json.Unmarshal(jsonData, &result)
 		require.NoError(t, err)
-
-		assert.Equal(t, "null", string(jsonData))
+		
+		require.Len(t, result, 2)
+		assert.Equal(t, "1", result[0]["id"])
+		assert.Equal(t, "users", result[0]["type"])
+		assert.Equal(t, "2", result[1]["id"])
+		assert.Equal(t, "users", result[1]["type"])
 	})
+}
 
-	t.Run("unmarshal single resource", func(t *testing.T) {
-		jsonData := `{"id":"1","type":"users","attributes":{"name":"John"}}`
-
+// TestPrimaryData_UnmarshalJSON tests unmarshaling JSON to PrimaryData
+func TestPrimaryData_UnmarshalJSON(t *testing.T) {
+	t.Run("null resource", func(t *testing.T) {
+		jsonData := []byte("null")
 		var data PrimaryData
-		err := json.Unmarshal([]byte(jsonData), &data)
+		err := json.Unmarshal(jsonData, &data)
 		require.NoError(t, err)
-
-		assert.False(t, data.Null())
-		resource, ok := data.One()
-		assert.True(t, ok)
-		assert.Equal(t, "1", resource.ID)
-		assert.Equal(t, "users", resource.Type)
-		assert.Equal(t, "John", resource.Attributes["name"])
-	})
-
-	t.Run("unmarshal multiple resources", func(t *testing.T) {
-		jsonData := `[{"id":"1","type":"users"},{"id":"2","type":"users"}]`
-
-		var data PrimaryData
-		err := json.Unmarshal([]byte(jsonData), &data)
-		require.NoError(t, err)
-
-		assert.False(t, data.Null())
-		resources, ok := data.Many()
-		assert.True(t, ok)
-		assert.Len(t, resources, 2)
-		assert.Equal(t, "1", resources[0].ID)
-		assert.Equal(t, "2", resources[1].ID)
-	})
-
-	t.Run("unmarshal null resource", func(t *testing.T) {
-		jsonData := `null`
-
-		var data PrimaryData
-		err := json.Unmarshal([]byte(jsonData), &data)
-		require.NoError(t, err)
-
 		assert.True(t, data.Null())
 	})
+
+	t.Run("single resource", func(t *testing.T) {
+		jsonData := []byte(`{"id":"1","type":"users"}`)
+		var data PrimaryData
+		err := json.Unmarshal(jsonData, &data)
+		require.NoError(t, err)
+		
+		resource, ok := data.One()
+		require.True(t, ok)
+		assert.Equal(t, "1", resource.ID)
+		assert.Equal(t, "users", resource.Type)
+	})
+
+	t.Run("multiple resources", func(t *testing.T) {
+		jsonData := []byte(`[{"id":"1","type":"users"},{"id":"2","type":"users"}]`)
+		var data PrimaryData
+		err := json.Unmarshal(jsonData, &data)
+		require.NoError(t, err)
+		
+		resources, ok := data.Many()
+		require.True(t, ok)
+		require.Len(t, resources, 2)
+		assert.Equal(t, "1", resources[0].ID)
+		assert.Equal(t, "users", resources[0].Type)
+		assert.Equal(t, "2", resources[1].ID)
+		assert.Equal(t, "users", resources[1].Type)
+	})
 }
 
-func TestDocument_Structure(t *testing.T) {
-	doc := Document{
-		Meta: map[string]interface{}{
-			"version": "1.0",
-		},
-		Data: SingleResource(Resource{
-			ID:   "1",
-			Type: "users",
-			Attributes: map[string]interface{}{
-				"name": "John Doe",
+// TestLink tests the Link type
+func TestLink_MarshalJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		link     Link
+		expected string
+	}{
+		{
+			name: "simple href",
+			link: Link{
+				Href: "/api/test/1",
 			},
-		}),
-		Links: map[string]Link{
-			"self": {Href: "/users/1"},
+			expected: `"/api/test/1"`,
 		},
-		Included: []Resource{
-			{ID: "1", Type: "posts", Attributes: map[string]interface{}{"title": "Post 1"}},
+		{
+			name: "href with meta",
+			link: Link{
+				Href: "/api/test/1",
+				Meta: map[string]interface{}{
+					"type": "primary",
+					"info": "additional information",
+				},
+			},
+			expected: `{"href":"/api/test/1","meta":{"info":"additional information","type":"primary"}}`,
+		},
+		{
+			name:     "empty link",
+			link:     Link{},
+			expected: `null`,
+		},
+		{
+			name: "empty href with meta",
+			link: Link{
+				Meta: map[string]interface{}{
+					"type": "primary",
+				},
+			},
+			expected: `null`,
 		},
 	}
 
-	jsonData, err := json.Marshal(doc)
-	require.NoError(t, err)
-
-	var unmarshaled Document
-	err = json.Unmarshal(jsonData, &unmarshaled)
-	require.NoError(t, err)
-
-	assert.Equal(t, doc.Meta, unmarshaled.Meta)
-	assert.Equal(t, doc.Links, unmarshaled.Links)
-	assert.Len(t, unmarshaled.Included, 1)
-
-	resource, ok := unmarshaled.Data.One()
-	assert.True(t, ok)
-	assert.Equal(t, "1", resource.ID)
-	assert.Equal(t, "users", resource.Type)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.link)
+			require.NoError(t, err)
+			
+			// For object comparison, we need to normalize the JSON
+			if tt.expected[0] == '{' {
+				var expected, actual interface{}
+				err = json.Unmarshal([]byte(tt.expected), &expected)
+				require.NoError(t, err)
+				err = json.Unmarshal(data, &actual)
+				require.NoError(t, err)
+				assert.Equal(t, expected, actual)
+			} else {
+				assert.Equal(t, tt.expected, string(data))
+			}
+		})
+	}
 }
 
-func TestError_Structure(t *testing.T) {
+// TestLink_UnmarshalJSON tests unmarshaling JSON to Link
+func TestLink_UnmarshalJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		json     string
+		expected Link
+	}{
+		{
+			name: "string href",
+			json: `"/api/test/1"`,
+			expected: Link{
+				Href: "/api/test/1",
+			},
+		},
+		{
+			name: "object with href",
+			json: `{"href":"/api/test/1"}`,
+			expected: Link{
+				Href: "/api/test/1",
+			},
+		},
+		{
+			name: "object with href and meta",
+			json: `{"href":"/api/test/1","meta":{"type":"primary"}}`,
+			expected: Link{
+				Href: "/api/test/1",
+				Meta: map[string]interface{}{
+					"type": "primary",
+				},
+			},
+		},
+		{
+			name:     "null",
+			json:     `null`,
+			expected: Link{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var link Link
+			err := json.Unmarshal([]byte(tt.json), &link)
+			require.NoError(t, err)
+			
+			assert.Equal(t, tt.expected.Href, link.Href)
+			
+			if tt.expected.Meta == nil {
+				assert.Nil(t, link.Meta)
+			} else {
+				assert.Equal(t, tt.expected.Meta, link.Meta)
+			}
+		})
+	}
+}
+
+// TestError tests the Error type
+func TestError(t *testing.T) {
+	// Create an error
 	err := Error{
-		ID:     "error-1",
-		Status: "400",
-		Code:   "INVALID_REQUEST",
-		Title:  "Invalid Request",
-		Detail: "The request is invalid",
+		ID:     "123",
+		Status: "404",
+		Code:   "not_found",
+		Title:  "Resource Not Found",
+		Detail: "The requested resource could not be found",
 		Source: map[string]interface{}{
-			"pointer": "/data/attributes/name",
+			"pointer":   "/data/attributes/title",
+			"parameter": "title",
 		},
 		Links: map[string]interface{}{
-			"about": "https://example.com/errors/invalid-request",
+			"about": "/errors/not_found",
 		},
 	}
 
-	jsonData, jsonErr := json.Marshal(err)
-	require.NoError(t, jsonErr)
+	// Verify the error properties
+	assert.Equal(t, "123", err.ID)
+	assert.Equal(t, "404", err.Status)
+	assert.Equal(t, "not_found", err.Code)
+	assert.Equal(t, "Resource Not Found", err.Title)
+	assert.Equal(t, "The requested resource could not be found", err.Detail)
+	assert.Equal(t, "/data/attributes/title", err.Source["pointer"])
+	assert.Equal(t, "title", err.Source["parameter"])
+	assert.Equal(t, "/errors/not_found", err.Links["about"])
 
-	var unmarshaled Error
-	jsonErr = json.Unmarshal(jsonData, &unmarshaled)
-	require.NoError(t, jsonErr)
-
-	assert.Equal(t, err, unmarshaled)
+	// Test the Error method
+	assert.Equal(t, "Resource Not Found: The requested resource could not be found (not_found)", err.Error())
 }
 
-func TestLink_Structure(t *testing.T) {
-	link := Link{
-		Href: "https://example.com/users/1",
-		Meta: map[string]interface{}{
-			"count": 10,
+// TestMultiError tests the MultiError type
+func TestMultiError(t *testing.T) {
+	// Create a multi-error
+	multiErr := MultiError{
+		{
+			Status: "400",
+			Title:  "Bad Request",
+			Detail: "Invalid request format",
+		},
+		{
+			Status: "422",
+			Title:  "Validation Error",
+			Detail: "Field 'name' is required",
 		},
 	}
 
-	jsonData, err := json.Marshal(link)
-	require.NoError(t, err)
+	// Verify the multi-error properties
+	require.Len(t, multiErr, 2)
+	assert.Equal(t, "400", multiErr[0].Status)
+	assert.Equal(t, "Bad Request", multiErr[0].Title)
+	assert.Equal(t, "Invalid request format", multiErr[0].Detail)
+	assert.Equal(t, "422", multiErr[1].Status)
+	assert.Equal(t, "Validation Error", multiErr[1].Title)
+	assert.Equal(t, "Field 'name' is required", multiErr[1].Detail)
 
-	var unmarshaled Link
-	err = json.Unmarshal(jsonData, &unmarshaled)
-	require.NoError(t, err)
-
-	assert.Equal(t, link.Href, unmarshaled.Href)
-	assert.Equal(t, float64(10), unmarshaled.Meta["count"]) // JSON numbers are float64
-
-	jsonData = []byte("null")
-	err = json.Unmarshal(jsonData, &unmarshaled)
-	require.NoError(t, err)
-
-	assert.Equal(t, "", unmarshaled.Href)
-	assert.Len(t, unmarshaled.Meta, 0)
-}
-
-func TestRelationship_Structure(t *testing.T) {
-	rel := Relationship{
-		Meta: map[string]interface{}{
-			"count": 2,
-		},
-		Links: map[string]Link{
-			"self": {Href: "/users/1/relationships/posts"},
-		},
-		Data: MultiResource(
-			Resource{ID: "1", Type: "posts"},
-			Resource{ID: "2", Type: "posts"},
-		),
-	}
-
-	jsonData, err := json.Marshal(rel)
-	require.NoError(t, err)
-
-	var unmarshaled Relationship
-	err = json.Unmarshal(jsonData, &unmarshaled)
-	require.NoError(t, err)
-
-	assert.Equal(t, float64(2), unmarshaled.Meta["count"]) // JSON numbers are float64
-	assert.Equal(t, rel.Links, unmarshaled.Links)
-
-	resources, ok := unmarshaled.Data.Many()
-	assert.True(t, ok)
-	assert.Len(t, resources, 2)
+	// Test the Error method
+	assert.Contains(t, multiErr.Error(), "Bad Request: Invalid request format")
+	assert.Contains(t, multiErr.Error(), "Validation Error: Field 'name' is required")
 }

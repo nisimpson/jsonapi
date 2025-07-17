@@ -11,8 +11,8 @@ import (
 
 // UnmarshalOptions contains options for unmarshaling operations.
 type UnmarshalOptions struct {
-	unmarshaler        func([]byte, interface{}) error
-	strictMode         bool
+	unmarshaler          func([]byte, interface{}) error
+	strictMode           bool
 	populateFromIncluded bool
 }
 
@@ -23,7 +23,7 @@ func WithUnmarshaler(fn func([]byte, interface{}) error) func(*UnmarshalOptions)
 	}
 }
 
-// StrictMode enables strict mode unmarshaling which returns errors for unknown fields or invalid JSON:API structure.
+// StrictMode enables strict mode unmarshaling which returns errors for invalid JSON:API structure.
 func StrictMode() func(*UnmarshalOptions) {
 	return func(opts *UnmarshalOptions) {
 		opts.strictMode = true
@@ -44,6 +44,10 @@ func Unmarshal(data []byte, out interface{}, opts ...func(*UnmarshalOptions)) er
 
 // UnmarshalWithContext unmarshals JSON:API data into a Go struct with a provided context.
 func UnmarshalWithContext(ctx context.Context, data []byte, out interface{}, opts ...func(*UnmarshalOptions)) error {
+	if _, ok := out.(*Document); ok {
+		return fmt.Errorf("call UnmarshalDocument() to unmarshal into a document")
+	}
+
 	options := &UnmarshalOptions{
 		unmarshaler: json.Unmarshal,
 	}
@@ -441,20 +445,6 @@ func convertToInt(value interface{}) (int64, error) {
 		return int64(v), nil
 	case int64:
 		return v, nil
-	case uint:
-		return int64(v), nil
-	case uint8:
-		return int64(v), nil
-	case uint16:
-		return int64(v), nil
-	case uint32:
-		return int64(v), nil
-	case uint64:
-		return int64(v), nil
-	case float32:
-		return int64(v), nil
-	case float64:
-		return int64(v), nil
 	case string:
 		return strconv.ParseInt(v, 10, 64)
 	default:
@@ -464,16 +454,6 @@ func convertToInt(value interface{}) (int64, error) {
 
 func convertToUint(value interface{}) (uint64, error) {
 	switch v := value.(type) {
-	case int:
-		return uint64(v), nil
-	case int8:
-		return uint64(v), nil
-	case int16:
-		return uint64(v), nil
-	case int32:
-		return uint64(v), nil
-	case int64:
-		return uint64(v), nil
 	case uint:
 		return uint64(v), nil
 	case uint8:
@@ -484,10 +464,6 @@ func convertToUint(value interface{}) (uint64, error) {
 		return uint64(v), nil
 	case uint64:
 		return v, nil
-	case float32:
-		return uint64(v), nil
-	case float64:
-		return uint64(v), nil
 	case string:
 		return strconv.ParseUint(v, 10, 64)
 	default:
@@ -534,12 +510,6 @@ func convertToBool(value interface{}) (bool, error) {
 		return v, nil
 	case string:
 		return strconv.ParseBool(v)
-	case int, int8, int16, int32, int64:
-		return reflect.ValueOf(v).Int() != 0, nil
-	case uint, uint8, uint16, uint32, uint64:
-		return reflect.ValueOf(v).Uint() != 0, nil
-	case float32, float64:
-		return reflect.ValueOf(v).Float() != 0, nil
 	default:
 		return false, fmt.Errorf("cannot convert %T to bool", value)
 	}

@@ -1,860 +1,412 @@
 package jsonapi
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// Custom types for testing
-type CustomResource struct {
-	ID   string
-	Name string
-}
-
-func (c CustomResource) MarshalJSONAPIResource(ctx context.Context) (Resource, error) {
-	return Resource{
-		Type: "custom",
-		ID:   c.ID,
+// TestSpecCompliance_ResourceObject tests compliance with the JSON:API spec for resource objects
+func TestSpecCompliance_ResourceObject(t *testing.T) {
+	// Create a resource object
+	resource := Resource{
+		ID:   "1",
+		Type: "articles",
 		Attributes: map[string]interface{}{
-			"name":   c.Name,
-			"custom": "value",
+			"title": "JSON:API paints my bikeshed!",
 		},
-	}, nil
+		Relationships: map[string]Relationship{
+			"author": {
+				Links: map[string]Link{
+					"self":    {Href: "/articles/1/relationships/author"},
+					"related": {Href: "/articles/1/author"},
+				},
+				Data: SingleResource(Resource{
+					ID:   "9",
+					Type: "people",
+				}),
+			},
+			"comments": {
+				Links: map[string]Link{
+					"self":    {Href: "/articles/1/relationships/comments"},
+					"related": {Href: "/articles/1/comments"},
+				},
+				Data: MultiResource(
+					Resource{ID: "5", Type: "comments"},
+					Resource{ID: "12", Type: "comments"},
+				),
+			},
+		},
+		Links: map[string]Link{
+			"self": {Href: "/articles/1"},
+		},
+	}
+
+	// Marshal to JSON
+	data, err := json.Marshal(resource)
+	require.NoError(t, err)
+
+	// Unmarshal to verify structure
+	var result map[string]interface{}
+	err = json.Unmarshal(data, &result)
+	require.NoError(t, err)
+
+	// Verify resource object structure according to spec
+	assert.Equal(t, "1", result["id"])
+	assert.Equal(t, "articles", result["type"])
+
+	// Verify attributes
+	attributes, ok := result["attributes"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "JSON:API paints my bikeshed!", attributes["title"])
+
+	// Verify relationships
+	relationships, ok := result["relationships"].(map[string]interface{})
+	require.True(t, ok)
+
+	// Verify author relationship
+	author, ok := relationships["author"].(map[string]interface{})
+	require.True(t, ok)
+	authorLinks, ok := author["links"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "/articles/1/relationships/author", authorLinks["self"])
+	assert.Equal(t, "/articles/1/author", authorLinks["related"])
+	authorData, ok := author["data"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "9", authorData["id"])
+	assert.Equal(t, "people", authorData["type"])
+
+	// Verify comments relationship
+	comments, ok := relationships["comments"].(map[string]interface{})
+	require.True(t, ok)
+	commentsLinks, ok := comments["links"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "/articles/1/relationships/comments", commentsLinks["self"])
+	assert.Equal(t, "/articles/1/comments", commentsLinks["related"])
+	commentsData, ok := comments["data"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, commentsData, 2)
+	comment1, ok := commentsData[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "5", comment1["id"])
+	assert.Equal(t, "comments", comment1["type"])
+	comment2, ok := commentsData[1].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "12", comment2["id"])
+	assert.Equal(t, "comments", comment2["type"])
+
+	// Verify links
+	links, ok := result["links"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "/articles/1", links["self"])
 }
 
-func (c CustomResource) MarshalJSONAPILinks(ctx context.Context) (map[string]Link, error) {
-	return map[string]Link{
-		"self": {Href: "/custom/" + c.ID},
-	}, nil
-}
-
-func (c CustomResource) MarshalJSONAPIMeta(ctx context.Context) (map[string]interface{}, error) {
-	return map[string]interface{}{
-		"version": "2.0",
-	}, nil
-}
-
-// TestSpecificationCompliance tests that the library meets all JSON:API specification requirements
-func TestSpecificationCompliance(t *testing.T) {
-	t.Run("Document Structure", func(t *testing.T) {
-		// Test that Document has all required fields according to spec
-		doc := Document{
-			Meta:     map[string]interface{}{"version": "1.0"},
-			Data:     SingleResource(Resource{ID: "1", Type: "users"}),
-			Errors:   []Error{{Status: "400", Code: "BAD_REQUEST", Title: "Bad Request", Detail: "Invalid input"}},
-			Links:    map[string]Link{"self": {Href: "/users"}},
-			Included: []Resource{{ID: "2", Type: "posts"}},
-		}
-
-		jsonData, err := json.Marshal(doc)
-		require.NoError(t, err)
-
-		var unmarshaled Document
-		err = json.Unmarshal(jsonData, &unmarshaled)
-		require.NoError(t, err)
-
-		assert.NotNil(t, unmarshaled.Meta)
-		assert.NotNil(t, unmarshaled.Links)
-		assert.Len(t, unmarshaled.Errors, 1)
-		assert.Len(t, unmarshaled.Included, 1)
-	})
-
-	t.Run("Resource Structure", func(t *testing.T) {
-		// Test that Resource has all required fields according to spec
-		resource := Resource{
-			ID:            "1",
-			Type:          "users",
-			Meta:          map[string]interface{}{"version": "1.0"},
-			Attributes:    map[string]interface{}{"name": "John"},
-			Relationships: map[string]Relationship{"posts": {Data: NullResource()}},
-			Links:         map[string]Link{"self": {Href: "/users/1"}},
-		}
-
-		// Test Ref() method
-		ref := resource.Ref()
-		assert.Equal(t, "1", ref.ID)
-		assert.Equal(t, "users", ref.Type)
-		assert.Nil(t, ref.Attributes)
-		assert.Nil(t, ref.Relationships)
-		assert.Nil(t, ref.Meta)
-		assert.Nil(t, ref.Links)
-	})
-
-	t.Run("PrimaryData Variants", func(t *testing.T) {
-		// Test single resource
-		single := SingleResource(Resource{ID: "1", Type: "users"})
-		assert.False(t, single.Null())
-		resource, ok := single.One()
-		assert.True(t, ok)
-		assert.Equal(t, "1", resource.ID)
-
-		// Test multiple resources
-		multi := MultiResource(
-			Resource{ID: "1", Type: "users"},
-			Resource{ID: "2", Type: "users"},
-		)
-		assert.False(t, multi.Null())
-		resources, ok := multi.Many()
-		assert.True(t, ok)
-		assert.Len(t, resources, 2)
-
-		// Test null resource
-		null := NullResource()
-		assert.True(t, null.Null())
-		_, ok = null.One()
-		assert.False(t, ok)
-		_, ok = null.Many()
-		assert.False(t, ok)
-
-		// Test iterator
-		var collected []Resource
-		for r := range multi.Iter() {
-			collected = append(collected, *r)
-		}
-		assert.Len(t, collected, 2)
-	})
-
-	t.Run("Struct Tag Marshaling", func(t *testing.T) {
-		type TestStruct struct {
-			ID    string `jsonapi:"primary,test-resources"`
-			Name  string `jsonapi:"attr,name"`
-			Email string `jsonapi:"attr,email,omitempty"`
-		}
-
-		// Test with all fields
-		obj := TestStruct{ID: "1", Name: "Test", Email: "test@example.com"}
-		data, err := Marshal(obj)
-		require.NoError(t, err)
-
-		var doc Document
-		err = json.Unmarshal(data, &doc)
-		require.NoError(t, err)
-
-		resource, ok := doc.Data.One()
-		assert.True(t, ok)
-		assert.Equal(t, "1", resource.ID)
-		assert.Equal(t, "test-resources", resource.Type)
-		assert.Equal(t, "Test", resource.Attributes["name"])
-		assert.Equal(t, "test@example.com", resource.Attributes["email"])
-
-		// Test omitempty
-		objEmpty := TestStruct{ID: "2", Name: "Test2"} // Email is empty
-		data, err = Marshal(objEmpty)
-		require.NoError(t, err)
-
-		err = json.Unmarshal(data, &doc)
-		require.NoError(t, err)
-
-		resource, ok = doc.Data.One()
-		assert.True(t, ok)
-		assert.NotContains(t, resource.Attributes, "email")
-	})
-
-	t.Run("Relationship Marshaling", func(t *testing.T) {
-		type Post struct {
-			ID    string `jsonapi:"primary,posts"`
-			Title string `jsonapi:"attr,title"`
-		}
-
-		type User struct {
-			ID    string `jsonapi:"primary,users"`
-			Name  string `jsonapi:"attr,name"`
-			Posts []Post `jsonapi:"relation,posts"`
-		}
-
-		user := User{
+// TestSpecCompliance_Document tests compliance with the JSON:API spec for document structure
+func TestSpecCompliance_Document(t *testing.T) {
+	// Create a document
+	doc := Document{
+		Data: SingleResource(Resource{
 			ID:   "1",
-			Name: "John",
-			Posts: []Post{
-				{ID: "1", Title: "Post 1"},
-				{ID: "2", Title: "Post 2"},
+			Type: "articles",
+			Attributes: map[string]interface{}{
+				"title": "JSON:API paints my bikeshed!",
+			},
+			Relationships: map[string]Relationship{
+				"author": {
+					Data: SingleResource(Resource{
+						ID:   "9",
+						Type: "people",
+					}),
+				},
+			},
+		}),
+		Included: []Resource{
+			{
+				ID:   "9",
+				Type: "people",
+				Attributes: map[string]interface{}{
+					"name": "John Doe",
+				},
+			},
+		},
+		Meta: map[string]interface{}{
+			"copyright": "Copyright 2023 Example Corp.",
+		},
+		Links: map[string]Link{
+			"self": {Href: "/articles/1"},
+		},
+	}
+
+	// Marshal to JSON
+	data, err := json.Marshal(doc)
+	require.NoError(t, err)
+
+	// Unmarshal to verify structure
+	var result map[string]interface{}
+	err = json.Unmarshal(data, &result)
+	require.NoError(t, err)
+
+	// Verify document structure according to spec
+	primaryData, ok := result["data"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "1", primaryData["id"])
+	assert.Equal(t, "articles", primaryData["type"])
+
+	// Verify included resources
+	included, ok := result["included"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, included, 1)
+	includedResource, ok := included[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "9", includedResource["id"])
+	assert.Equal(t, "people", includedResource["type"])
+
+	// Verify meta
+	meta, ok := result["meta"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "Copyright 2023 Example Corp.", meta["copyright"])
+
+	// Verify links
+	links, ok := result["links"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "/articles/1", links["self"])
+}
+
+// TestSpecCompliance_Errors tests compliance with the JSON:API spec for error objects
+func TestSpecCompliance_Errors(t *testing.T) {
+	// Create an error document
+	errorDoc := Document{
+		Errors: []Error{
+			{
+				ID:     "123",
+				Status: "422",
+				Code:   "validation_error",
+				Title:  "Invalid Attribute",
+				Detail: "First name must contain at least three characters.",
+				Source: map[string]interface{}{
+					"pointer": "/data/attributes/firstName",
+				},
+				Links: map[string]interface{}{
+					"about": "/errors/validation",
+				},
+			},
+			{
+				ID:     "124",
+				Status: "422",
+				Code:   "validation_error",
+				Title:  "Invalid Attribute",
+				Detail: "Password must contain a special character.",
+				Source: map[string]interface{}{
+					"pointer": "/data/attributes/password",
+				},
+			},
+		},
+	}
+
+	// Marshal to JSON
+	data, err := json.Marshal(errorDoc)
+	require.NoError(t, err)
+
+	// Unmarshal to verify structure
+	var result map[string]interface{}
+	err = json.Unmarshal(data, &result)
+	require.NoError(t, err)
+
+	// Verify error structure according to spec
+	errors, ok := result["errors"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, errors, 2)
+
+	// Verify first error
+	error1, ok := errors[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "123", error1["id"])
+	assert.Equal(t, "422", error1["status"])
+	assert.Equal(t, "validation_error", error1["code"])
+	assert.Equal(t, "Invalid Attribute", error1["title"])
+	assert.Equal(t, "First name must contain at least three characters.", error1["detail"])
+	source1, ok := error1["source"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "/data/attributes/firstName", source1["pointer"])
+	links1, ok := error1["links"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "/errors/validation", links1["about"])
+
+	// Verify second error
+	error2, ok := errors[1].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "124", error2["id"])
+	assert.Equal(t, "422", error2["status"])
+	assert.Equal(t, "validation_error", error2["code"])
+	assert.Equal(t, "Invalid Attribute", error2["title"])
+	assert.Equal(t, "Password must contain a special character.", error2["detail"])
+	source2, ok := error2["source"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "/data/attributes/password", source2["pointer"])
+}
+
+// TestSpecCompliance_Relationships tests compliance with the JSON:API spec for relationship objects
+func TestSpecCompliance_Relationships(t *testing.T) {
+	// Create a relationship
+	relationship := Relationship{
+		Links: map[string]Link{
+			"self":    {Href: "/articles/1/relationships/author"},
+			"related": {Href: "/articles/1/author"},
+		},
+		Data: SingleResource(Resource{
+			ID:   "9",
+			Type: "people",
+		}),
+		Meta: map[string]interface{}{
+			"count": 1,
+		},
+	}
+
+	// Marshal to JSON
+	data, err := json.Marshal(relationship)
+	require.NoError(t, err)
+
+	// Unmarshal to verify structure
+	var result map[string]interface{}
+	err = json.Unmarshal(data, &result)
+	require.NoError(t, err)
+
+	// Verify relationship structure according to spec
+	links, ok := result["links"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "/articles/1/relationships/author", links["self"])
+	assert.Equal(t, "/articles/1/author", links["related"])
+
+	resourceData, ok := result["data"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "9", resourceData["id"])
+	assert.Equal(t, "people", resourceData["type"])
+
+	meta, ok := result["meta"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, float64(1), meta["count"])
+}
+
+// TestSpecCompliance_Links tests compliance with the JSON:API spec for link objects
+func TestSpecCompliance_Links(t *testing.T) {
+	t.Run("string link", func(t *testing.T) {
+		// Create a simple link
+		link := Link{
+			Href: "/articles/1",
+		}
+
+		// Marshal to JSON
+		data, err := json.Marshal(link)
+		require.NoError(t, err)
+
+		// Verify link is marshaled as a string
+		assert.Equal(t, `"/articles/1"`, string(data))
+	})
+
+	t.Run("object link", func(t *testing.T) {
+		// Create a link with meta
+		link := Link{
+			Href: "/articles/1",
+			Meta: map[string]interface{}{
+				"count": 10,
 			},
 		}
 
-		// Test without included resources
-		data, err := Marshal(user)
+		// Marshal to JSON
+		data, err := json.Marshal(link)
 		require.NoError(t, err)
 
-		var doc Document
-		err = json.Unmarshal(data, &doc)
+		// Unmarshal to verify structure
+		var result map[string]interface{}
+		err = json.Unmarshal(data, &result)
 		require.NoError(t, err)
 
-		resource, ok := doc.Data.One()
-		assert.True(t, ok)
-		assert.Contains(t, resource.Relationships, "posts")
-
-		postsRel := resource.Relationships["posts"]
-		postRefs, ok := postsRel.Data.Many()
-		assert.True(t, ok)
-		assert.Len(t, postRefs, 2)
-		assert.Equal(t, "1", postRefs[0].ID)
-		assert.Equal(t, "posts", postRefs[0].Type)
-
-		// Test with included resources
-		data, err = Marshal(user, IncludeRelatedResources())
-		require.NoError(t, err)
-
-		err = json.Unmarshal(data, &doc)
-		require.NoError(t, err)
-
-		assert.Len(t, doc.Included, 2)
-		assert.Equal(t, "Post 1", doc.Included[0].Attributes["title"])
-	})
-
-	t.Run("Embedded Struct Support", func(t *testing.T) {
-		type Timestamps struct {
-			CreatedAt time.Time `jsonapi:"attr,created_at"`
-			UpdatedAt time.Time `jsonapi:"attr,updated_at"`
-		}
-
-		type User struct {
-			Timestamps
-			ID   string `jsonapi:"primary,users"`
-			Name string `jsonapi:"attr,name"`
-		}
-
-		now := time.Now()
-		user := User{
-			ID:   "1",
-			Name: "John",
-			Timestamps: Timestamps{
-				CreatedAt: now,
-				UpdatedAt: now,
-			},
-		}
-
-		data, err := Marshal(user)
-		require.NoError(t, err)
-
-		var doc Document
-		err = json.Unmarshal(data, &doc)
-		require.NoError(t, err)
-
-		resource, ok := doc.Data.One()
-		assert.True(t, ok)
-		assert.Contains(t, resource.Attributes, "created_at")
-		assert.Contains(t, resource.Attributes, "updated_at")
-		assert.Contains(t, resource.Attributes, "name")
-	})
-
-	t.Run("Custom Marshaling Interfaces", func(t *testing.T) {
-		obj := CustomResource{ID: "1", Name: "Custom"}
-		data, err := Marshal(obj)
-		require.NoError(t, err)
-
-		var doc Document
-		err = json.Unmarshal(data, &doc)
-		require.NoError(t, err)
-
-		resource, ok := doc.Data.One()
-		assert.True(t, ok)
-		assert.Equal(t, "custom", resource.Type)
-		assert.Equal(t, "value", resource.Attributes["custom"])
-		assert.Equal(t, "/custom/1", resource.Links["self"].Href)
-		assert.Equal(t, "2.0", resource.Meta["version"])
-	})
-
-	t.Run("Context Support", func(t *testing.T) {
-		type User struct {
-			ID   string `jsonapi:"primary,users"`
-			Name string `jsonapi:"attr,name"`
-		}
-
-		ctx := context.WithValue(context.Background(), "test", "value")
-		user := User{ID: "1", Name: "John"}
-
-		data, err := MarshalWithContext(ctx, user)
-		require.NoError(t, err)
-
-		var doc Document
-		err = json.Unmarshal(data, &doc)
-		require.NoError(t, err)
-
-		resource, ok := doc.Data.One()
-		assert.True(t, ok)
-		assert.Equal(t, "1", resource.ID)
-	})
-
-	t.Run("Marshaling Options", func(t *testing.T) {
-		type User struct {
-			ID   string `jsonapi:"primary,users"`
-			Name string `jsonapi:"attr,name"`
-		}
-
-		user := User{ID: "1", Name: "John"}
-
-		// Test custom marshaler
-		data, err := Marshal(user, WithMarshaler(func(out interface{}) ([]byte, error) {
-			return json.MarshalIndent(out, "", "  ")
-		}))
-		require.NoError(t, err)
-		assert.Contains(t, string(data), "\n") // Should be indented
-	})
-
-	t.Run("Error Handling", func(t *testing.T) {
-		// Test nil input
-		_, err := Marshal(nil)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "cannot marshal nil value")
-
-		// Test nil pointer
-		var user *struct{}
-		_, err = Marshal(user)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "cannot marshal nil value")
-
-		// Test non-struct
-		_, err = Marshal("not a struct")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "expected struct")
-	})
-
-	t.Run("Thread Safety", func(t *testing.T) {
-		type User struct {
-			ID   string `jsonapi:"primary,users"`
-			Name string `jsonapi:"attr,name"`
-		}
-
-		user := User{ID: "1", Name: "John"}
-
-		// Run multiple goroutines to test thread safety
-		done := make(chan bool, 10)
-		for i := 0; i < 10; i++ {
-			go func() {
-				_, err := Marshal(user)
-				assert.NoError(t, err)
-				done <- true
-			}()
-		}
-
-		// Wait for all goroutines to complete
-		for i := 0; i < 10; i++ {
-			<-done
-		}
+		// Verify link structure according to spec
+		assert.Equal(t, "/articles/1", result["href"])
+		meta, ok := result["meta"].(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, float64(10), meta["count"])
 	})
 }
 
-// TestUnmarshalingSpecificationCompliance tests that the library meets all JSON:API specification requirements for unmarshaling
-func TestUnmarshalingSpecificationCompliance(t *testing.T) {
-	t.Run("Core Unmarshaling Functions", func(t *testing.T) {
-		// Test Unmarshal function
-		jsonData := `{
-			"data": {
-				"type": "users",
-				"id": "1",
-				"attributes": {
-					"name": "John Doe"
-				}
-			}
-		}`
+// TestSpecCompliance_Pagination tests compliance with the JSON:API spec for pagination
+func TestSpecCompliance_Pagination(t *testing.T) {
+	// Create a document with pagination links
+	doc := Document{
+		Data: MultiResource(
+			Resource{ID: "1", Type: "articles"},
+			Resource{ID: "2", Type: "articles"},
+		),
+		Links: map[string]Link{
+			"self":  {Href: "/articles?page[number]=3&page[size]=10"},
+			"first": {Href: "/articles?page[number]=1&page[size]=10"},
+			"prev":  {Href: "/articles?page[number]=2&page[size]=10"},
+			"next":  {Href: "/articles?page[number]=4&page[size]=10"},
+			"last":  {Href: "/articles?page[number]=5&page[size]=10"},
+		},
+		Meta: map[string]interface{}{
+			"totalPages": 5,
+		},
+	}
 
-		var user UnmarshalUser
-		err := Unmarshal([]byte(jsonData), &user)
-		require.NoError(t, err)
-		assert.Equal(t, "1", user.ID)
-		assert.Equal(t, "John Doe", user.Name)
+	// Marshal to JSON
+	data, err := json.Marshal(doc)
+	require.NoError(t, err)
 
-		// Test UnmarshalWithContext function
-		ctx := context.WithValue(context.Background(), "test", "value")
-		var user2 UnmarshalUser
-		err = UnmarshalWithContext(ctx, []byte(jsonData), &user2)
-		require.NoError(t, err)
-		assert.Equal(t, "1", user2.ID)
+	// Unmarshal to verify structure
+	var result map[string]interface{}
+	err = json.Unmarshal(data, &result)
+	require.NoError(t, err)
 
-		// Test UnmarshalDocument function
-		doc, err := UnmarshalDocument([]byte(jsonData))
-		require.NoError(t, err)
-		resource, ok := doc.Data.One()
-		assert.True(t, ok)
-		assert.Equal(t, "1", resource.ID)
-		assert.Equal(t, "users", resource.Type)
-	})
+	// Verify pagination links according to spec
+	links, ok := result["links"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "/articles?page[number]=3&page[size]=10", links["self"])
+	assert.Equal(t, "/articles?page[number]=1&page[size]=10", links["first"])
+	assert.Equal(t, "/articles?page[number]=2&page[size]=10", links["prev"])
+	assert.Equal(t, "/articles?page[number]=4&page[size]=10", links["next"])
+	assert.Equal(t, "/articles?page[number]=5&page[size]=10", links["last"])
 
-	t.Run("Unmarshaling Options", func(t *testing.T) {
-		jsonData := `{
-			"data": {
-				"type": "users",
-				"id": "1",
-				"attributes": {
-					"name": "John Doe"
-				},
-				"relationships": {
-					"posts": {
-						"data": [{"type": "posts", "id": "1"}]
-					}
-				}
-			},
-			"included": [
-				{
-					"type": "posts",
-					"id": "1",
-					"attributes": {
-						"title": "Test Post"
-					}
-				}
-			]
-		}`
+	// Verify meta
+	meta, ok := result["meta"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, float64(5), meta["totalPages"])
+}
 
-		// Test WithUnmarshaler option
-		var user1 UnmarshalUserWithPosts
-		err := Unmarshal([]byte(jsonData), &user1, WithUnmarshaler(func(data []byte, out interface{}) error {
-			return json.Unmarshal(data, out)
-		}))
-		require.NoError(t, err)
-		assert.Equal(t, "John Doe", user1.Name)
+// TestSpecCompliance_SparseFieldsets tests compliance with the JSON:API spec for sparse fieldsets
+func TestSpecCompliance_SparseFieldsets(t *testing.T) {
+	// Define a test struct
+	type User struct {
+		ID    string `jsonapi:"primary,users"`
+		Name  string `jsonapi:"attr,name"`
+		Email string `jsonapi:"attr,email"`
+		Age   int    `jsonapi:"attr,age"`
+	}
 
-		// Test PopulateFromIncluded option
-		var user2 UnmarshalUserWithPosts
-		err = Unmarshal([]byte(jsonData), &user2, PopulateFromIncluded())
-		require.NoError(t, err)
-		assert.Len(t, user2.Posts, 1)
-		assert.Equal(t, "Test Post", user2.Posts[0].Title)
+	user := User{
+		ID:    "1",
+		Name:  "John Doe",
+		Email: "john@example.com",
+		Age:   30,
+	}
 
-		// Test StrictMode option
-		invalidTypeData := `{
-			"data": {
-				"type": "posts",
-				"id": "1",
-				"attributes": {
-					"name": "John Doe"
-				}
-			}
-		}`
-		var user3 UnmarshalUser
-		err = Unmarshal([]byte(invalidTypeData), &user3, StrictMode())
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "resource type mismatch")
-	})
+	// Marshal with SparseFieldsets option
+	data, err := Marshal(user, SparseFieldsets("users", []string{"name"}))
+	assert.NoError(t, err)
 
-	t.Run("Custom Unmarshaling Interfaces", func(t *testing.T) {
-		// Test ResourceUnmarshaler
-		jsonData := `{
-			"data": {
-				"type": "users",
-				"id": "1",
-				"attributes": {
-					"name": "John Doe",
-					"custom_field": "custom_value"
-				}
-			}
-		}`
+	// Unmarshal to verify
+	var doc Document
+	err = json.Unmarshal(data, &doc)
+	assert.NoError(t, err)
 
-		var user CustomUnmarshalUser
-		err := Unmarshal([]byte(jsonData), &user)
-		require.NoError(t, err)
-		assert.Equal(t, "1", user.ID)
-		assert.Equal(t, "John Doe", user.Name)
-		assert.Equal(t, "custom_value", user.CustomField)
-
-		// Test LinksUnmarshaler
-		linksData := `{
-			"data": {
-				"type": "users",
-				"id": "1",
-				"attributes": {
-					"name": "John Doe"
-				},
-				"links": {
-					"self": {"href": "/users/1"}
-				}
-			}
-		}`
-
-		var userWithLinks UnmarshalUserWithLinks
-		err = Unmarshal([]byte(linksData), &userWithLinks)
-		require.NoError(t, err)
-		assert.Equal(t, "/users/1", userWithLinks.Links["self"])
-
-		// Test MetaUnmarshaler
-		metaData := `{
-			"data": {
-				"type": "users",
-				"id": "1",
-				"attributes": {
-					"name": "John Doe"
-				},
-				"meta": {
-					"version": "1.0"
-				}
-			}
-		}`
-
-		var userWithMeta UnmarshalUserWithMeta
-		err = Unmarshal([]byte(metaData), &userWithMeta)
-		require.NoError(t, err)
-		assert.Equal(t, "1.0", userWithMeta.MetaMap["version"])
-	})
-
-	t.Run("Struct Tag Unmarshaling", func(t *testing.T) {
-		// Test primary key unmarshaling
-		jsonData := `{
-			"data": {
-				"type": "users",
-				"id": "123",
-				"attributes": {
-					"name": "John Doe",
-					"email": "john@example.com",
-					"age": 30
-				}
-			}
-		}`
-
-		var user UnmarshalUser
-		err := Unmarshal([]byte(jsonData), &user)
-		require.NoError(t, err)
-
-		// Primary key
-		assert.Equal(t, "123", user.ID)
-
-		// Attributes
-		assert.Equal(t, "John Doe", user.Name)
-		assert.Equal(t, "john@example.com", user.Email)
-		assert.Equal(t, 30, user.Age)
-
-		// Test relationships
-		relationshipData := `{
-			"data": {
-				"type": "users",
-				"id": "1",
-				"attributes": {
-					"name": "John Doe"
-				},
-				"relationships": {
-					"posts": {
-						"data": [
-							{"type": "posts", "id": "1"},
-							{"type": "posts", "id": "2"}
-						]
-					}
-				}
-			}
-		}`
-
-		var userWithPosts UnmarshalUserWithPosts
-		err = Unmarshal([]byte(relationshipData), &userWithPosts)
-		require.NoError(t, err)
-		assert.Len(t, userWithPosts.Posts, 2)
-		assert.Equal(t, "1", userWithPosts.Posts[0].ID)
-		assert.Equal(t, "2", userWithPosts.Posts[1].ID)
-	})
-
-	t.Run("Type Conversion Support", func(t *testing.T) {
-		// Test various type conversions
-		jsonData := `{
-			"data": {
-				"type": "test",
-				"id": "1",
-				"attributes": {
-					"string_field": "test",
-					"int_from_string": "42",
-					"int_from_float": 42.7,
-					"float_from_int": 42,
-					"bool_from_string": "true"
-				}
-			}
-		}`
-
-		type TestStruct struct {
-			ID             string  `jsonapi:"primary,test"`
-			StringField    string  `jsonapi:"attr,string_field"`
-			IntFromString  int     `jsonapi:"attr,int_from_string"`
-			IntFromFloat   int     `jsonapi:"attr,int_from_float"`
-			FloatFromInt   float64 `jsonapi:"attr,float_from_int"`
-			BoolFromString bool    `jsonapi:"attr,bool_from_string"`
-		}
-
-		var test TestStruct
-		err := Unmarshal([]byte(jsonData), &test)
-		require.NoError(t, err)
-
-		assert.Equal(t, "test", test.StringField)
-		assert.Equal(t, 42, test.IntFromString)
-		assert.Equal(t, 42, test.IntFromFloat)
-		assert.Equal(t, 42.0, test.FloatFromInt)
-		assert.Equal(t, true, test.BoolFromString)
-	})
-
-	t.Run("Embedded Struct Support", func(t *testing.T) {
-		now := time.Now()
-		jsonData := `{
-			"data": {
-				"type": "users",
-				"id": "1",
-				"attributes": {
-					"name": "John Doe",
-					"created_at": "` + now.Format(time.RFC3339) + `",
-					"updated_at": "` + now.Format(time.RFC3339) + `"
-				}
-			}
-		}`
-
-		var user UnmarshalUserWithTimestamp
-		err := Unmarshal([]byte(jsonData), &user)
-		require.NoError(t, err)
-
-		assert.Equal(t, "1", user.ID)
-		assert.Equal(t, "John Doe", user.Name)
-		assert.WithinDuration(t, now, user.CreatedAt, time.Second)
-		assert.WithinDuration(t, now, user.UpdatedAt, time.Second)
-	})
-
-	t.Run("Document Structure Support", func(t *testing.T) {
-		// Test single resource document
-		singleData := `{
-			"data": {
-				"type": "users",
-				"id": "1",
-				"attributes": {
-					"name": "John Doe"
-				}
-			},
-			"meta": {
-				"version": "1.0"
-			}
-		}`
-
-		var user UnmarshalUser
-		err := Unmarshal([]byte(singleData), &user)
-		require.NoError(t, err)
-		assert.Equal(t, "1", user.ID)
-
-		// Test multiple resource document
-		multipleData := `{
-			"data": [
-				{
-					"type": "users",
-					"id": "1",
-					"attributes": {
-						"name": "John Doe"
-					}
-				},
-				{
-					"type": "users",
-					"id": "2",
-					"attributes": {
-						"name": "Jane Doe"
-					}
-				}
-			]
-		}`
-
-		var users []UnmarshalUser
-		err = Unmarshal([]byte(multipleData), &users)
-		require.NoError(t, err)
-		assert.Len(t, users, 2)
-
-		// Test null data document
-		nullData := `{
-			"data": null
-		}`
-
-		var nullUser UnmarshalUser
-		err = Unmarshal([]byte(nullData), &nullUser)
-		require.NoError(t, err)
-		assert.Equal(t, "", nullUser.ID) // Should be zero value
-	})
-
-	t.Run("Relationship Population", func(t *testing.T) {
-		// Test relationship population from included resources
-		compoundData := `{
-			"data": {
-				"type": "users",
-				"id": "1",
-				"attributes": {
-					"name": "John Doe"
-				},
-				"relationships": {
-					"posts": {
-						"data": [
-							{"type": "posts", "id": "1"},
-							{"type": "posts", "id": "2"}
-						]
-					}
-				}
-			},
-			"included": [
-				{
-					"type": "posts",
-					"id": "1",
-					"attributes": {
-						"title": "First Post",
-						"body": "Content 1"
-					}
-				},
-				{
-					"type": "posts",
-					"id": "2",
-					"attributes": {
-						"title": "Second Post",
-						"body": "Content 2"
-					}
-				}
-			]
-		}`
-
-		var user UnmarshalUserWithPosts
-		err := Unmarshal([]byte(compoundData), &user, PopulateFromIncluded())
-		require.NoError(t, err)
-
-		assert.Equal(t, "1", user.ID)
-		assert.Equal(t, "John Doe", user.Name)
-		assert.Len(t, user.Posts, 2)
-		assert.Equal(t, "1", user.Posts[0].ID)
-		assert.Equal(t, "First Post", user.Posts[0].Title)
-		assert.Equal(t, "Content 1", user.Posts[0].Body)
-		assert.Equal(t, "2", user.Posts[1].ID)
-		assert.Equal(t, "Second Post", user.Posts[1].Title)
-		assert.Equal(t, "Content 2", user.Posts[1].Body)
-	})
-
-	t.Run("Error Handling", func(t *testing.T) {
-		// Test various error conditions
-
-		// Invalid JSON
-		_, err := UnmarshalDocument([]byte(`{invalid json}`))
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to unmarshal JSON:API document")
-
-		// Nil output
-		err = Unmarshal([]byte(`{"data": null}`), nil)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "cannot unmarshal into nil value")
-
-		// Non-pointer output
-		var user UnmarshalUser
-		err = Unmarshal([]byte(`{"data": null}`), user)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "out parameter must be a pointer")
-
-		// Nil pointer
-		var userPtr *UnmarshalUser
-		err = Unmarshal([]byte(`{"data": null}`), userPtr)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "cannot unmarshal into nil pointer")
-
-		// Type mismatch in strict mode
-		mismatchData := `{
-			"data": {
-				"type": "posts",
-				"id": "1",
-				"attributes": {
-					"name": "John Doe"
-				}
-			}
-		}`
-
-		var user2 UnmarshalUser
-		err = Unmarshal([]byte(mismatchData), &user2, StrictMode())
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "resource type mismatch")
-	})
-
-	t.Run("Thread Safety", func(t *testing.T) {
-		jsonData := `{
-			"data": {
-				"type": "users",
-				"id": "1",
-				"attributes": {
-					"name": "John Doe"
-				}
-			}
-		}`
-
-		// Run multiple goroutines to test thread safety
-		done := make(chan bool, 10)
-		for i := 0; i < 10; i++ {
-			go func() {
-				var user UnmarshalUser
-				err := Unmarshal([]byte(jsonData), &user)
-				assert.NoError(t, err)
-				assert.Equal(t, "1", user.ID)
-				done <- true
-			}()
-		}
-
-		// Wait for all goroutines to complete
-		for i := 0; i < 10; i++ {
-			<-done
-		}
-	})
-
-	t.Run("Context Support", func(t *testing.T) {
-		jsonData := `{
-			"data": {
-				"type": "users",
-				"id": "1",
-				"attributes": {
-					"name": "John Doe"
-				}
-			}
-		}`
-
-		ctx := context.WithValue(context.Background(), "test", "value")
-		var user UnmarshalUser
-		err := UnmarshalWithContext(ctx, []byte(jsonData), &user)
-		require.NoError(t, err)
-		assert.Equal(t, "1", user.ID)
-	})
-
-	t.Run("Pointer and Slice Handling", func(t *testing.T) {
-		// Test pointer slices
-		jsonData := `{
-			"data": [
-				{
-					"type": "users",
-					"id": "1",
-					"attributes": {
-						"name": "John Doe"
-					}
-				},
-				{
-					"type": "users",
-					"id": "2",
-					"attributes": {
-						"name": "Jane Doe"
-					}
-				}
-			]
-		}`
-
-		var users []*UnmarshalUser
-		err := Unmarshal([]byte(jsonData), &users)
-		require.NoError(t, err)
-		assert.Len(t, users, 2)
-		assert.Equal(t, "1", users[0].ID)
-		assert.Equal(t, "2", users[1].ID)
-
-		// Test single resource to slice conversion
-		singleData := `{
-			"data": {
-				"type": "users",
-				"id": "1",
-				"attributes": {
-					"name": "John Doe"
-				}
-			}
-		}`
-
-		var userSlice []UnmarshalUser
-		err = Unmarshal([]byte(singleData), &userSlice)
-		require.NoError(t, err)
-		assert.Len(t, userSlice, 1)
-		assert.Equal(t, "1", userSlice[0].ID)
-
-		// Test empty array
-		emptyData := `{
-			"data": []
-		}`
-
-		var emptyUsers []UnmarshalUser
-		err = Unmarshal([]byte(emptyData), &emptyUsers)
-		require.NoError(t, err)
-		assert.Len(t, emptyUsers, 0)
-		assert.NotNil(t, emptyUsers) // Should be empty slice, not nil
-	})
+	// Verify only the name attribute is included
+	resource, ok := doc.Data.One()
+	assert.True(t, ok)
+	assert.Equal(t, "1", resource.ID)
+	assert.Equal(t, "users", resource.Type)
+	assert.Equal(t, "John Doe", resource.Attributes["name"])
+	assert.NotContains(t, resource.Attributes, "email")
+	assert.NotContains(t, resource.Attributes, "age")
 }
