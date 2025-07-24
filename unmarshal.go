@@ -418,7 +418,7 @@ func setFieldValue(fieldValue reflect.Value, value interface{}) error {
 			return nil
 		}
 
-	case reflect.Struct, reflect.Map, reflect.Slice:
+	case reflect.Struct, reflect.Map, reflect.Slice, reflect.Pointer:
 		// For complex types, try JSON marshaling/unmarshaling
 		if jsonBytes, err := json.Marshal(value); err == nil {
 			newValue := reflect.New(fieldType)
