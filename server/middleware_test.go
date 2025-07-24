@@ -51,7 +51,7 @@ func TestUseContentNegotiation(t *testing.T) {
 			name:           "POST request with no Content-Type",
 			method:         http.MethodPost,
 			accept:         "application/vnd.api+json",
-			expectedStatus: http.StatusOK, // The middleware doesn't check for missing Content-Type
+			expectedStatus: http.StatusUnsupportedMediaType,
 		},
 		{
 			name:           "POST request with Content-Type parameters",

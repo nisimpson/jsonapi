@@ -15,8 +15,29 @@ func UseContentNegotiation(next http.Handler) http.Handler {
 
 		// Check Content-Type for requests with body
 		if r.Method == http.MethodPost || r.Method == http.MethodPatch {
-			contentType := r.Header.Get("Content-Type")
-			if contentType != "" && contentType != jsonAPIContentType {
+			supportsContentType := false
+			for k, values := range r.Header {
+				if strings.ToLower(k) == "content-type" && len(values) > 0 {
+					for _, v := range values {
+						if strings.Contains(v, jsonAPIContentType) {
+							// content type value found; break
+							supportsContentType = true
+							exts := extractHeaderExtensions(v)
+							for k := range exts {
+								if !(k == "ext" || k == "profile") {
+									http.Error(w, "Unsupported Media Type", http.StatusUnsupportedMediaType)
+									return
+								}
+							}
+							break
+						}
+					}
+					// content type header found; break
+					break
+				}
+			}
+
+			if !supportsContentType {
 				http.Error(w, "Unsupported Media Type", http.StatusUnsupportedMediaType)
 				return
 			}
@@ -31,6 +52,22 @@ func UseContentNegotiation(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func extractHeaderExtensions(value string) map[string]string {
+	extensions := make(map[string]string)
+	if !strings.Contains(value, ";") {
+		return extensions
+	}
+	pairs := strings.Split(value, ";")
+	// extract extensions
+	for _, pair := range pairs {
+		kv := strings.Split(pair, "=")
+		if len(kv) == 2 {
+			extensions[strings.TrimSpace(kv[0])] = strings.TrimSpace(kv[1])
+		}
+	}
+	return extensions
 }
 
 // UseRequestContextResolver creates middleware that resolves request context

@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -986,7 +987,7 @@ func TestDefaultHandler(t *testing.T) {
 	})
 
 	t.Run("routes POST /{type} to create", func(t *testing.T) {
-		createHandler := &mockHandler{response: "create"}
+		createHandler := &mockHandler{response: "create", statusCode: 201}
 		resourceHandler := server.ResourceHandler{Create: createHandler}
 
 		mux := server.ResourceHandlerMux{
@@ -994,11 +995,12 @@ func TestDefaultHandler(t *testing.T) {
 		}
 
 		handler := server.DefaultHandler(mux)
-		req := httptest.NewRequest("POST", "/users", nil)
+		req := httptest.NewRequest("POST", "/users", bytes.NewBufferString(`{}`))
+		req.Header.Add("Content-Type", "application/vnd.api+json")
 		w := httptest.NewRecorder()
 
 		handler.ServeHTTP(w, req)
-
+		assert.Equal(t, http.StatusCreated, w.Result().StatusCode)
 		assert.True(t, createHandler.called)
 	})
 
@@ -1011,11 +1013,13 @@ func TestDefaultHandler(t *testing.T) {
 		}
 
 		handler := server.DefaultHandler(mux)
-		req := httptest.NewRequest("PATCH", "/users/123", nil)
+		req := httptest.NewRequest("PATCH", "/users/123", bytes.NewBufferString(`{}`))
+		req.Header.Add("Content-Type", "application/vnd.api+json")
 		w := httptest.NewRecorder()
 
 		handler.ServeHTTP(w, req)
 
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 		assert.True(t, updateHandler.called)
 	})
 
@@ -1271,7 +1275,8 @@ func TestIntegration_FullRequestFlow(t *testing.T) {
 		mux := server.ResourceHandlerMux{"users": resourceHandler}
 		handler := server.DefaultHandler(mux)
 
-		req := httptest.NewRequest("POST", "/users", nil)
+		req := httptest.NewRequest("POST", "/users", bytes.NewBufferString(`{}`))
+		req.Header.Set("content-type", "application/vnd.api+json")
 		w := httptest.NewRecorder()
 
 		handler.ServeHTTP(w, req)
