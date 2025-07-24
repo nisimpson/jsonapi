@@ -13,9 +13,11 @@ import (
 func TestUnmarshal(t *testing.T) {
 	// Define a test struct
 	type User struct {
-		ID    string `jsonapi:"primary,users"`
-		Name  string `jsonapi:"attr,name"`
-		Email string `jsonapi:"attr,email"`
+		ID    string   `jsonapi:"primary,users"`
+		Name  string   `jsonapi:"attr,name"`
+		Email string   `jsonapi:"attr,email"`
+		Tags  []string `jsonapi:"attr,tags"`
+		Ints  []int    `jsonapi:"attr,ints"`
 	}
 
 	// Create test JSON data
@@ -25,7 +27,9 @@ func TestUnmarshal(t *testing.T) {
 			"type": "users",
 			"attributes": {
 				"name": "John Doe",
-				"email": "john@example.com"
+				"email": "john@example.com",
+				"tags": ["one", "two", "three"],
+				"ints": [1, 2, 3]
 			}
 		}
 	}`)
@@ -39,6 +43,8 @@ func TestUnmarshal(t *testing.T) {
 	assert.Equal(t, "123", user.ID)
 	assert.Equal(t, "John Doe", user.Name)
 	assert.Equal(t, "john@example.com", user.Email)
+	assert.EqualValues(t, []string{"one", "two", "three"}, user.Tags)
+	assert.EqualValues(t, []int{1, 2, 3}, user.Ints)
 }
 
 // TestUnmarshalWithContext tests the UnmarshalWithContext function
