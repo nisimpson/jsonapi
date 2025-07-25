@@ -25,6 +25,18 @@ type UnmarshalOptions struct {
 	permitReadOnly       bool
 }
 
+// defaultUnmarshalOptions returns the default options used for unmarshaling JSON:API documents.
+// It enables read-only fields, uses the standard json.Unmarshal function, disables strict mode,
+// and disables relationship population from included resources.
+func defaultUnmarshalOptions() UnmarshalOptions {
+	return UnmarshalOptions{
+		unmarshaler:          json.Unmarshal,
+		strictMode:           false,
+		permitReadOnly:       true,
+		populateFromIncluded: false,
+	}
+}
+
 // PermitReadOnly returns an option that toggles unmarshaling of read-only fields.
 // When disabled, any attempts to [Unmarshal] documents with read-only fields will
 // return an error wrapping [ErrReadOnly].
@@ -66,9 +78,7 @@ func UnmarshalWithContext(ctx context.Context, data []byte, out interface{}, opt
 		return fmt.Errorf("call UnmarshalDocument() to unmarshal into a document")
 	}
 
-	options := UnmarshalOptions{
-		unmarshaler: json.Unmarshal,
-	}
+	options := defaultUnmarshalOptions()
 
 	for _, opt := range opts {
 		opt(&options)
@@ -99,9 +109,7 @@ func UnmarshalWithContext(ctx context.Context, data []byte, out interface{}, opt
 
 // UnmarshalDocument unmarshals a [Document] into the target struct.
 func UnmarshalDocument(ctx context.Context, doc *Document, out interface{}, opts ...func(*UnmarshalOptions)) error {
-	options := UnmarshalOptions{
-		unmarshaler: json.Unmarshal,
-	}
+	options := defaultUnmarshalOptions()
 
 	for _, opt := range opts {
 		opt(&options)

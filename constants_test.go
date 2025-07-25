@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestStructTagConstants verifies that the struct tag constants work correctly
@@ -121,17 +122,13 @@ func TestReadOnlyWithConstants(t *testing.T) {
 	}
 
 	resource, _, err := marshalSingle(context.Background(), obj)
-	if err != nil {
-		t.Fatalf("Failed to marshal: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Check that both fields are present in marshaled output
-	if _, exists := resource.Attributes["regular"]; !exists {
-		t.Error("Expected regular field to be present")
-	}
-	if _, exists := resource.Attributes["readonly_field"]; !exists {
-		t.Error("Expected readonly field to be present in marshaled output")
-	}
+	_, exists := resource.Attributes["regular"]
+	assert.True(t, exists, "expected regular field to be present")
+	_, exists = resource.Attributes["readonly_field"]
+	assert.True(t, exists, "Expected readonly field to be present in marshaled output")
 
 	// Test unmarshaling without AllowReadOnly - should fail
 	jsonData := []byte(`{
