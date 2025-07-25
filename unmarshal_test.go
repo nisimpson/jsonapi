@@ -58,6 +58,33 @@ func TestUnmarshal(t *testing.T) {
 	assert.Equal(t, "Nested Value", user.Nested.Nested.Value)
 }
 
+func TestUnmarshal_Readonly(t *testing.T) {
+	// Define a test struct
+	type User struct {
+		ID    string `jsonapi:"primary,users"`
+		Name  string `jsonapi:"attr,name,readonly"`
+		Email string `jsonapi:"attr,email"`
+	}
+
+	// Create test JSON data
+	jsonData := []byte(`{
+		"data": {
+			"id": "123",
+			"type": "users",
+			"attributes": {
+				"name": "John Doe",
+				"email": "john@example.com"
+			}
+		}
+	}`)
+
+	// Unmarshal the data
+	var user User
+	err := Unmarshal(jsonData, &user, PermitReadOnly(false))
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrReadOnly)
+}
+
 // TestUnmarshalWithContext tests the UnmarshalWithContext function
 func TestUnmarshalWithContext(t *testing.T) {
 	// Define a test struct
@@ -294,7 +321,7 @@ func TestUnmarshalFromDocument(t *testing.T) {
 
 	// Unmarshal into a struct
 	var user User
-	err := unmarshalFromDocument(context.Background(), doc, &user, &UnmarshalOptions{})
+	err := unmarshalFromDocument(context.Background(), doc, &user, UnmarshalOptions{})
 	require.NoError(t, err)
 
 	// Verify the result
@@ -319,7 +346,7 @@ func TestUnmarshalFromDocument_Null(t *testing.T) {
 
 	// Unmarshal into a struct
 	var user User
-	err := unmarshalFromDocument(context.Background(), doc, &user, &UnmarshalOptions{})
+	err := unmarshalFromDocument(context.Background(), doc, &user, UnmarshalOptions{})
 	require.NoError(t, err)
 
 	// Verify the result is zero value
@@ -361,7 +388,7 @@ func TestUnmarshalFromDocument_ManyToOne(t *testing.T) {
 
 	// Unmarshal into a struct (should take the first resource)
 	var user User
-	err := unmarshalFromDocument(context.Background(), doc, &user, &UnmarshalOptions{})
+	err := unmarshalFromDocument(context.Background(), doc, &user, UnmarshalOptions{})
 	require.NoError(t, err)
 
 	// Verify the result
@@ -579,6 +606,57 @@ func TestUnmarshalRelationship_ToMany(t *testing.T) {
 	assert.Equal(t, "Child 2", parent.ManyChildren[1].Name)
 	assert.Equal(t, 8, parent.ManyChildren[1].Age)
 	assert.False(t, parent.ManyChildren[1].Active)
+}
+
+func TestUnmarshalRelationship_ReadOnly(t *testing.T) {
+	// Test structures for relationship unmarshaling
+	type RelationshipChild struct {
+		ID     string `jsonapi:"primary,children"`
+		Name   string `jsonapi:"attr,name"`
+		Age    int    `jsonapi:"attr,age"`
+		Active bool   `jsonapi:"attr,active"`
+	}
+
+	type RelationshipParent struct {
+		ID          string            `jsonapi:"primary,parents"`
+		Name        string            `jsonapi:"attr,name"`
+		SingleChild RelationshipChild `jsonapi:"relation,single_child,readonly"`
+	}
+
+	// Test unmarshaling a to-one relationship
+	jsonData := []byte(`{
+		"data": {
+			"id": "parent-1",
+			"type": "parents",
+			"attributes": {
+				"name": "Parent 1"
+			},
+			"relationships": {
+				"single_child": {
+					"data": {
+						"id": "child-1",
+						"type": "children"
+					}
+				}
+			}
+		},
+		"included": [
+			{
+				"id": "child-1",
+				"type": "children",
+				"attributes": {
+					"name": "Child 1",
+					"age": 10,
+					"active": true
+				}
+			}
+		]
+	}`)
+
+	var parent RelationshipParent
+	err := Unmarshal(jsonData, &parent, PopulateFromIncluded(), PermitReadOnly(false))
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrReadOnly)
 }
 
 // TestCustomUnmarshaler tests custom unmarshaling through interfaces

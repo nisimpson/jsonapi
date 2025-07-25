@@ -3,10 +3,18 @@ package jsonapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
+)
+
+var (
+	// ErrReadOnly is returned when attempts to [Unmarshal] a [Document] with
+	// readonly attributes occur.
+	ErrReadOnly = errors.New("read-only")
 )
 
 // UnmarshalOptions contains options for unmarshaling operations.
@@ -14,6 +22,16 @@ type UnmarshalOptions struct {
 	unmarshaler          func([]byte, interface{}) error
 	strictMode           bool
 	populateFromIncluded bool
+	permitReadOnly       bool
+}
+
+// PermitReadOnly returns an option that toggles unmarshaling of read-only fields.
+// When disabled, any attempts to [Unmarshal] documents with read-only fields will
+// return an error wrapping [ErrReadOnly].
+func PermitReadOnly(enabled bool) func(*UnmarshalOptions) {
+	return func(opts *UnmarshalOptions) {
+		opts.permitReadOnly = enabled
+	}
 }
 
 // WithUnmarshaler uses a custom JSON unmarshaler to deserialize documents.
@@ -48,12 +66,12 @@ func UnmarshalWithContext(ctx context.Context, data []byte, out interface{}, opt
 		return fmt.Errorf("call UnmarshalDocument() to unmarshal into a document")
 	}
 
-	options := &UnmarshalOptions{
+	options := UnmarshalOptions{
 		unmarshaler: json.Unmarshal,
 	}
 
 	for _, opt := range opts {
-		opt(options)
+		opt(&options)
 	}
 
 	if out == nil {
@@ -81,19 +99,19 @@ func UnmarshalWithContext(ctx context.Context, data []byte, out interface{}, opt
 
 // UnmarshalDocument unmarshals a [Document] into the target struct.
 func UnmarshalDocument(ctx context.Context, doc *Document, out interface{}, opts ...func(*UnmarshalOptions)) error {
-	options := &UnmarshalOptions{
+	options := UnmarshalOptions{
 		unmarshaler: json.Unmarshal,
 	}
 
 	for _, opt := range opts {
-		opt(options)
+		opt(&options)
 	}
 
 	return unmarshalFromDocument(ctx, doc, out, options)
 }
 
 // unmarshalFromDocument unmarshals a Document into the target struct.
-func unmarshalFromDocument(ctx context.Context, doc *Document, out interface{}, opts *UnmarshalOptions) error {
+func unmarshalFromDocument(ctx context.Context, doc *Document, out interface{}, opts UnmarshalOptions) error {
 	v := reflect.ValueOf(out).Elem()
 	t := v.Type()
 
@@ -123,7 +141,7 @@ func unmarshalFromDocument(ctx context.Context, doc *Document, out interface{}, 
 }
 
 // unmarshalSliceFromDocument unmarshals a Document into a slice target.
-func unmarshalSliceFromDocument(ctx context.Context, doc *Document, v reflect.Value, opts *UnmarshalOptions) error {
+func unmarshalSliceFromDocument(ctx context.Context, doc *Document, v reflect.Value, opts UnmarshalOptions) error {
 	if doc.Data.Null() {
 		// Set to nil slice for null data
 		v.Set(reflect.Zero(v.Type()))
@@ -166,7 +184,7 @@ func unmarshalSliceFromDocument(ctx context.Context, doc *Document, v reflect.Va
 }
 
 // unmarshalResource unmarshals a single resource into a struct value.
-func unmarshalResource(ctx context.Context, resource Resource, v reflect.Value, included []Resource, opts *UnmarshalOptions) error {
+func unmarshalResource(ctx context.Context, resource Resource, v reflect.Value, included []Resource, opts UnmarshalOptions) error {
 	// Check if the type implements ResourceUnmarshaler
 	if v.CanAddr() {
 		if unmarshaler, ok := v.Addr().Interface().(ResourceUnmarshaler); ok {
@@ -179,7 +197,7 @@ func unmarshalResource(ctx context.Context, resource Resource, v reflect.Value, 
 }
 
 // unmarshalWithReflection uses reflection to unmarshal a resource based on struct tags.
-func unmarshalWithReflection(ctx context.Context, resource Resource, v reflect.Value, included []Resource, opts *UnmarshalOptions) error {
+func unmarshalWithReflection(ctx context.Context, resource Resource, v reflect.Value, included []Resource, opts UnmarshalOptions) error {
 	t := v.Type()
 	if t.Kind() != reflect.Struct {
 		return fmt.Errorf("expected struct, got %s", t.Kind())
@@ -196,7 +214,7 @@ func unmarshalWithReflection(ctx context.Context, resource Resource, v reflect.V
 			continue
 		}
 
-		tag := field.Tag.Get("jsonapi")
+		tag := field.Tag.Get(StructTagName)
 		if tag == "" {
 			continue
 		}
@@ -211,7 +229,7 @@ func unmarshalWithReflection(ctx context.Context, resource Resource, v reflect.V
 		options := parts[2:]
 
 		switch tagType {
-		case "primary":
+		case TagValuePrimary:
 			// Validate resource type
 			if resource.Type != name {
 				if opts.strictMode {
@@ -219,19 +237,19 @@ func unmarshalWithReflection(ctx context.Context, resource Resource, v reflect.V
 				}
 			}
 			// Set the ID
-			if err := setFieldValue(fieldValue, resource.ID); err != nil {
+			if err := setFieldValue(fieldValue, resource.ID, opts, nil); err != nil {
 				return fmt.Errorf("failed to set primary field %s: %w", field.Name, err)
 			}
 
-		case "attr":
+		case TagValueAttribute:
 			// Set attribute value
 			if attrValue, exists := resource.Attributes[name]; exists {
-				if err := setFieldValue(fieldValue, attrValue); err != nil {
+				if err := setFieldValue(fieldValue, attrValue, opts, options); err != nil {
 					return fmt.Errorf("failed to set attribute field %s: %w", field.Name, err)
 				}
 			}
 
-		case "relation":
+		case TagValueRelationship:
 			// Handle relationship
 			if rel, exists := resource.Relationships[name]; exists {
 				if err := unmarshalRelationship(ctx, rel, fieldValue, included, opts, options); err != nil {
@@ -264,7 +282,11 @@ func unmarshalWithReflection(ctx context.Context, resource Resource, v reflect.V
 }
 
 // unmarshalRelationship unmarshals a relationship field.
-func unmarshalRelationship(ctx context.Context, rel Relationship, fieldValue reflect.Value, included []Resource, opts *UnmarshalOptions, fieldOptions []string) error {
+func unmarshalRelationship(ctx context.Context, rel Relationship, fieldValue reflect.Value, included []Resource, opts UnmarshalOptions, fieldOptions []string) error {
+	if slices.Contains(fieldOptions, TagOptionReadOnly) && !opts.permitReadOnly {
+		return ErrReadOnly
+	}
+
 	if rel.Data.Null() {
 		// Set to zero value for null relationships
 		fieldValue.Set(reflect.Zero(fieldValue.Type()))
@@ -303,7 +325,7 @@ func unmarshalRelationship(ctx context.Context, rel Relationship, fieldValue ref
 }
 
 // unmarshalSliceRelationship unmarshals a slice relationship.
-func unmarshalSliceRelationship(ctx context.Context, resources []Resource, fieldValue reflect.Value, included []Resource, opts *UnmarshalOptions) error {
+func unmarshalSliceRelationship(ctx context.Context, resources []Resource, fieldValue reflect.Value, included []Resource, opts UnmarshalOptions) error {
 	elemType := fieldValue.Type().Elem()
 	slice := reflect.MakeSlice(fieldValue.Type(), 0, len(resources))
 
@@ -337,7 +359,7 @@ func unmarshalSliceRelationship(ctx context.Context, resources []Resource, field
 }
 
 // unmarshalSingleRelationship unmarshals a single relationship.
-func unmarshalSingleRelationship(ctx context.Context, resource Resource, fieldValue reflect.Value, included []Resource, opts *UnmarshalOptions) error {
+func unmarshalSingleRelationship(ctx context.Context, resource Resource, fieldValue reflect.Value, included []Resource, opts UnmarshalOptions) error {
 	if opts.populateFromIncluded {
 		// Find full resource in included
 		if fullResource := findIncludedResource(resource.ID, resource.Type, included); fullResource != nil {
@@ -371,7 +393,11 @@ func findIncludedResource(id, resourceType string, included []Resource) *Resourc
 }
 
 // setFieldValue sets a field value with type conversion.
-func setFieldValue(fieldValue reflect.Value, value interface{}) error {
+func setFieldValue(fieldValue reflect.Value, value interface{}, opts UnmarshalOptions, fieldOptions []string) error {
+	if slices.Contains(fieldOptions, TagOptionReadOnly) && !opts.permitReadOnly {
+		return ErrReadOnly
+	}
+
 	if value == nil {
 		fieldValue.Set(reflect.Zero(fieldValue.Type()))
 		return nil

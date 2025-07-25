@@ -265,7 +265,7 @@ func marshalWithReflection(ctx context.Context, out interface{}) (Resource, []Re
 		field := fieldInfo.Field
 		fieldValue := getFieldValue(v, fieldInfo)
 
-		tag := field.Tag.Get("jsonapi")
+		tag := field.Tag.Get(StructTagName)
 		if tag == "" {
 			continue
 		}
@@ -280,17 +280,17 @@ func marshalWithReflection(ctx context.Context, out interface{}) (Resource, []Re
 		options := parts[2:]
 
 		// Check omitempty option
-		if contains(options, "omitempty") && isZeroValue(fieldValue) {
+		if contains(options, TagOptionOmitEmpty) && isZeroValue(fieldValue) {
 			continue
 		}
 
 		switch tagType {
-		case "primary":
+		case TagValuePrimary:
 			resource.Type = name
 			resource.ID = fmt.Sprintf("%v", fieldValue.Interface())
-		case "attr":
+		case TagValueAttribute:
 			resource.Attributes[name] = fieldValue.Interface()
-		case "relation":
+		case TagValueRelationship:
 			rel, relatedResources, err := marshalRelationship(ctx, fieldValue, options)
 			if err != nil {
 				return Resource{}, nil, err
@@ -310,7 +310,7 @@ func marshalRelationship(ctx context.Context, fieldValue reflect.Value, options 
 
 	// Zero values that are not slices...
 	if isZeroValue(fieldValue) {
-		if contains(options, "omitempty") {
+		if contains(options, TagOptionOmitEmpty) {
 			return rel, nil, nil
 		}
 		if fieldValue.Kind() != reflect.Slice {

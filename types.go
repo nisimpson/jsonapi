@@ -9,6 +9,57 @@ import (
 	"iter"
 )
 
+// Struct tag constants for JSON:API field definitions.
+// These constants define the tag name and tag values used in struct field tags
+// to control JSON:API marshaling and unmarshaling behavior.
+const (
+	// StructTagName is the name of the struct tag used for JSON:API field definitions.
+	// Example:
+	//
+	// 	`jsonapi:"primary,users"`
+	StructTagName = "jsonapi"
+
+	// TagValuePrimary indicates a field contains the primary resource ID and type.
+	// Format: `jsonapi:"primary,resource-type"`
+	// Example:
+	//
+	// 	`jsonapi:"primary,users"`
+	TagValuePrimary = "primary"
+
+	// TagValueAttribute indicates a field should be marshaled as a JSON:API attribute.
+	// Format: `jsonapi:"attr,attribute-name[,omitempty]"`
+	// Example:
+	//
+	// 	`jsonapi:"attr,name"` or `jsonapi:"attr,email,omitempty"`
+	TagValueAttribute = "attr"
+
+	// TagValueRelationship indicates a field should be marshaled as a JSON:API relationship.
+	// Format: `jsonapi:"relation,relationship-name[,omitempty]"`
+	// Example:
+	//
+	// 	`jsonapi:"relation,posts"` or `jsonapi:"relation,profile,omitempty"`
+	TagValueRelationship = "relation"
+
+	// TagOptionOmitEmpty is a tag option that causes empty/zero values to be omitted
+	// during marshaling. Can be used with both attributes and relationships.
+	// Example:
+	//
+	// 	`jsonapi:"attr,email,omitempty"`
+	TagOptionOmitEmpty = "omitempty"
+
+	// TagOptionReadOnly is a tag option that prevents a field from being unmarshaled
+	// unless the [PermitReadOnly] option is used. Read-only fields are still marshaled normally.
+	// Can be used with both attributes and relationships.
+	// Example:
+	//
+	// 	`jsonapi:"attr,created_at,readonly"` or `jsonapi:"relation,author,readonly"`
+	TagOptionReadOnly = "readonly"
+
+	// TagValueIgnore causes a field to be ignored during marshaling and unmarshaling.
+	// Format: `jsonapi:"-"`
+	TagValueIgnore = "-"
+)
+
 // Document represents the top-level JSON:API document structure.
 type Document struct {
 	Meta     map[string]interface{} `json:"meta,omitempty"`

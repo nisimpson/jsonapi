@@ -127,21 +127,51 @@ The library uses struct tags to determine how to marshal and unmarshal JSON:API 
 
 ```go
 type User struct {
-    ID       string `jsonapi:"primary,users"`        // Primary resource ID and type
-    Name     string `jsonapi:"attr,name"`            // Attribute
-    Email    string `jsonapi:"attr,email,omitempty"` // Optional attribute
-    Posts    []Post `jsonapi:"relation,posts"`       // To-many relationship
-    Profile  Profile `jsonapi:"relation,profile"`    // To-one relationship
-    Metadata string `jsonapi:"-"`                    // Ignored field
+    ID        string `jsonapi:"primary,users"`           // Primary resource ID and type
+    Name      string `jsonapi:"attr,name"`               // Attribute
+    Email     string `jsonapi:"attr,email,omitempty"`    // Optional attribute
+    CreatedAt string `jsonapi:"attr,created_at,readonly"` // Read-only attribute
+    Posts     []Post `jsonapi:"relation,posts"`          // To-many relationship
+    Profile   Profile `jsonapi:"relation,profile"`       // To-one relationship
+    Author    User   `jsonapi:"relation,author,readonly"` // Read-only relationship
+    Metadata  string `jsonapi:"-"`                       // Ignored field
 }
 ```
 
 ### Tag Format
 
 - `primary,type`: Marks a field as the primary ID field and specifies the resource type
-- `attr,name[,omitempty]`: Marks a field as an attribute with optional omitempty flag
-- `relation,name[,omitempty]`: Marks a field as a relationship with optional omitempty flag
+- `attr,name[,omitempty][,readonly]`: Marks a field as an attribute with optional flags
+- `relation,name[,omitempty][,readonly]`: Marks a field as a relationship with optional flags
 - `-`: Ignores the field during marshaling/unmarshaling
+
+### Tag Options
+
+- `omitempty`: Omits the field during marshaling if it has a zero value
+- `readonly`: Tags the field as read-only (see below for details)
+
+### Read-Only Fields
+
+Fields marked with the `readonly` tag option are marshaled normally but can fail unmarshaling if desired (see below). This is useful for server-generated fields like timestamps, computed values, or fields that should not be modified by clients:
+
+```go
+type Article struct {
+    ID        string    `jsonapi:"primary,articles"`
+    Title     string    `jsonapi:"attr,title"`
+    Content   string    `jsonapi:"attr,content"`
+    CreatedAt time.Time `jsonapi:"attr,created_at,readonly"` // Server-generated timestamp
+    UpdatedAt time.Time `jsonapi:"attr,updated_at,readonly"` // Server-generated timestamp
+    Author    User      `jsonapi:"relation,author,readonly"` // Cannot be changed after creation
+}
+```
+
+To prevent unmarshaling read-only fields (for example, when processing update requests), use the `PermitReadOnly()` option:
+
+```go
+var article Article
+err := jsonapi.Unmarshal(data, &article, jsonapi.PermitReadOnly(false))
+fmt.Println(errors.Is(err, jsonapi.ErrReadOnly)) // true
+```
 
 ## Relationships
 
