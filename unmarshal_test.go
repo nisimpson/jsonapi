@@ -106,7 +106,8 @@ func TestUnmarshalDocument(t *testing.T) {
 	}`)
 
 	// Unmarshal the document
-	doc, err := UnmarshalDocument(jsonData)
+	doc := Document{}
+	err := json.Unmarshal(jsonData, &doc)
 	require.NoError(t, err)
 
 	// Verify the document structure
@@ -606,7 +607,8 @@ func TestCustomUnmarshaler(t *testing.T) {
 
 	// Since we can't define methods inside functions, we'll just test the unmarshaling
 	// by manually creating a resource and calling the method
-	doc, err := UnmarshalDocument(jsonData)
+	doc := Document{}
+	err := json.Unmarshal(jsonData, &doc)
 	require.NoError(t, err)
 
 	resource, ok := doc.Data.One()

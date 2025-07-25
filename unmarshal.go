@@ -79,13 +79,17 @@ func UnmarshalWithContext(ctx context.Context, data []byte, out interface{}, opt
 	return unmarshalFromDocument(ctx, &doc, out, options)
 }
 
-// UnmarshalDocument unmarshals JSON:API data into a Document structure without converting to Go structs.
-func UnmarshalDocument(data []byte) (*Document, error) {
-	var doc Document
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal JSON:API document: %w", err)
+// UnmarshalDocument unmarshals a [Document] into the target struct.
+func UnmarshalDocument(ctx context.Context, doc *Document, out interface{}, opts ...func(*UnmarshalOptions)) error {
+	options := &UnmarshalOptions{
+		unmarshaler: json.Unmarshal,
 	}
-	return &doc, nil
+
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	return unmarshalFromDocument(ctx, doc, out, options)
 }
 
 // unmarshalFromDocument unmarshals a Document into the target struct.

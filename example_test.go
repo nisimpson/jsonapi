@@ -406,8 +406,8 @@ func ExampleUnmarshal_nestedStruct() {
 	// Address: Street=123 Main St, City=Anytown
 }
 
-// ExampleUnmarshalDocument demonstrates unmarshaling a JSON:API document directly
-func ExampleUnmarshalDocument() {
+// Example_unmarshalDocument demonstrates unmarshaling a JSON:API document directly
+func Example_unmarshalDocument() {
 	jsonData := `{
 		"data": {
 			"type": "users",
@@ -419,7 +419,8 @@ func ExampleUnmarshalDocument() {
 		}
 	}`
 
-	doc, err := jsonapi.UnmarshalDocument([]byte(jsonData))
+	doc := jsonapi.Document{}
+	err := json.Unmarshal([]byte(jsonData), &doc)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 	} else {
