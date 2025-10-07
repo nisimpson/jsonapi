@@ -6,7 +6,7 @@ on:
     types: [completed]
 
 env:
-  PACKAGE_NAME: github.com/nisimpson/jsonapi
+  PACKAGE_NAME: github.com/nisimpson/jsonapi/v2
 
 jobs:
   on-success:

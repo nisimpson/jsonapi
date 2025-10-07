@@ -1,4 +1,4 @@
-module github.com/nisimpson/jsonapi
+module github.com/nisimpson/jsonapi/v2
 
 go 1.24.4
 
