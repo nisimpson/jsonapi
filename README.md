@@ -28,11 +28,11 @@ go get github.com/nisimpson/jsonapi/v2
 
 ```go
 type Article struct {
-    ID       string `jsonapi:"primary,articles"`
-    Title    string `jsonapi:"attr,title"`
-    Content  string `jsonapi:"attr,content"`
-    AuthorID string `jsonapi:"relation,author"`
-    TagIDs   []string `jsonapi:"relation,tags"`
+    ID       string   `json:"-"`
+    Title    string   `json:"title"`
+    Content  string   `json:"content"`
+    AuthorID string   `json:"author"`
+    TagIDs   []string `json:"_"`
 }
 
 func (a Article) ResourceType() string { return "articles" }
