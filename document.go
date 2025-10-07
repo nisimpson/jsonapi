@@ -168,13 +168,19 @@ func (r *RelationshipData) UnmarshalJSON(data []byte) error {
 	return jsonUnmarshal(data, &r.one)
 }
 
-// Ref represents a JSON:API resource identifier object that provides
+// Ref represents a JSON:API [ResourceIdentifier] object that provides
 // a minimal representation of a [Resource] with just its type and identifier.
 type Ref struct {
 	Type string                 `json:"type,omitempty"` // Resource type identifier
 	ID   string                 `json:"id,omitempty"`   // Unique resource identifier
 	Meta map[string]interface{} `json:"meta,omitempty"` // Reference-specific metadata
 }
+
+// Ref also implements the [ResourceIdentifier] interface for [Resource] identification.
+var _ ResourceIdentifier = Ref{}
+
+func (r Ref) ResourceID() string   { return r.ID }
+func (r Ref) ResourceType() string { return r.Type }
 
 // Error represents a JSON:API error object that provides detailed information
 // about problems encountered during request processing.
