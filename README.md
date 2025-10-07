@@ -28,11 +28,11 @@ go get github.com/nisimpson/jsonapi/v2
 
 ```go
 type Article struct {
-    ID       string   `json:"-"`
-    Title    string   `json:"title"`
-    Content  string   `json:"content"`
-    AuthorID string   `json:"author"`
-    TagIDs   []string `json:"_"`
+    ID       string `json:"-"`
+    Title    string `json:"title"`
+    Content  string `json:"content"`
+    Author   *User  `json:"author"`
+    Tags     []Tag  `json:"-"`
 }
 
 func (a Article) ResourceType() string { return "articles" }
@@ -40,18 +40,29 @@ func (a Article) ResourceID() string { return a.ID }
 
 // Implement relationships
 func (a Article) Relationships() map[string]jsonapi.RelationType {
-    return map[string]jsonapi.RelationType{
-        "author": jsonapi.RelationToOne,
-        "tags":   jsonapi.RelationToMany,
-    }
+	return map[string]jsonapi.RelationType{
+		"author":   jsonapi.RelationToOne,     // Single related resource
+		"tags":     jsonapi.RelationToMany,    // Multiple related resources
+		"comments": jsonapi.RelationLinksOnly, // Links only, no data included
+	}
 }
 
-func (a *Article) SetRelation(name, id string, meta map[string]interface{}) error {
+func (a Article) MarshalRef(name string) []jsonapi.ResourceIdentifier {
+	switch name {
+	case "author":
+		return jsonapi.OneRef(a.User)
+	case "tags":
+		return jsonapi.ManyRef(a.Tags...)
+	}
+	return nil
+}
+
+func (a *Article) UnmarshalRef(name, id string, meta map[string]interface{}) error {
     switch name {
     case "author":
-        a.AuthorID = id
+        a.Author = &User{ID: id}
     case "tags":
-        a.TagIDs = append(a.TagIDs, id)
+        a.Tags = append(a.Tags, Tag{ID: id})
     }
     return nil
 }

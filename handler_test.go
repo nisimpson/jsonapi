@@ -59,7 +59,7 @@ func (a Article) Tags() []Tag {
 	return tags
 }
 
-func (a *Article) SetRelation(name, id string, meta map[string]interface{}) error {
+func (a *Article) UnmarshalRef(name, id string, meta map[string]interface{}) error {
 	switch name {
 	case "author":
 		a.AuthorID = id

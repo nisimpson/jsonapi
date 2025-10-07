@@ -34,24 +34,24 @@ type LinksUnmarshaler interface {
 // relationship data during unmarshaling operations.
 type RelationshipUnmarshaler interface {
 	RelationshipMarshaler
-	// SetRelation sets relationship data during unmarshaling.
-	SetRelation(name string, id string, meta map[string]interface{}) error
+	// UnmarshalRef sets relationship data during unmarshaling.
+	UnmarshalRef(name string, id string, meta map[string]interface{}) error
 }
 
 // RelationshipLinksUnmarshaler defines the interface for resources that can receive
 // relationship-specific links during unmarshaling operations.
 type RelationshipLinksUnmarshaler interface {
 	RelationshipMarshaler
-	// SetRelationLinks sets relationship links during unmarshaling.
-	SetRelationLinks(name string, links map[string]Link) error
+	// UnmarshalRefLinks sets relationship links during unmarshaling.
+	UnmarshalRefLinks(name string, links map[string]Link) error
 }
 
 // RelationshipMetaUnmarshaler defines the interface for resources that can receive
 // relationship-specific metadata during unmarshaling operations.
 type RelationshipMetaUnmarshaler interface {
 	RelationshipMarshaler
-	// SetRelationMeta sets relationship metadata during unmarshaling.
-	SetRelationMeta(name string, meta map[string]interface{}) error
+	// UnmarshalRefMeta sets relationship metadata during unmarshaling.
+	UnmarshalRefMeta(name string, meta map[string]interface{}) error
 }
 
 // UnmarshalData unmarshals the data portion of a JSON:API [Document] into the provided target.
@@ -198,7 +198,7 @@ func UnmarshalRef(data []byte, name string, target RelationshipUnmarshaler, opts
 		}
 
 		// Handle null data by clearing the to-one relationship
-		return target.SetRelation(name, "", nil)
+		return target.UnmarshalRef(name, "", nil)
 	}
 
 	// Create a temporary relationship object from the document data
@@ -222,13 +222,13 @@ func UnmarshalRef(data []byte, name string, target RelationshipUnmarshaler, opts
 // unmarshalRelationship unmarshals a single relationship into the target resource.
 func unmarshalRelationship(rel *Relationship, name string, id RelationshipUnmarshaler, options *options) error {
 	if unmarshaler, ok := id.(RelationshipLinksUnmarshaler); ok && len(rel.Links) > 0 {
-		if err := unmarshaler.SetRelationLinks(name, rel.Links); err != nil {
+		if err := unmarshaler.UnmarshalRefLinks(name, rel.Links); err != nil {
 			return fmt.Errorf("unmarshal links: %w", err)
 		}
 	}
 
 	if unmarshaler, ok := id.(RelationshipMetaUnmarshaler); ok && len(rel.Meta) > 0 {
-		if err := unmarshaler.SetRelationMeta(name, rel.Meta); err != nil {
+		if err := unmarshaler.UnmarshalRefMeta(name, rel.Meta); err != nil {
 			return fmt.Errorf("unmarshal meta: %w", err)
 		}
 	}
@@ -240,12 +240,12 @@ func unmarshalRelationship(rel *Relationship, name string, id RelationshipUnmars
 
 	if rel.Data.isMany {
 		for idx, one := range rel.Data.many {
-			if err := id.SetRelation(name, one.ID, one.Meta); err != nil {
+			if err := id.UnmarshalRef(name, one.ID, one.Meta); err != nil {
 				return fmt.Errorf("unmarshal ref %d: %w", idx, err)
 			}
 		}
 		return nil
 	}
 
-	return id.SetRelation(name, rel.Data.one.ID, rel.Data.one.Meta)
+	return id.UnmarshalRef(name, rel.Data.one.ID, rel.Data.one.Meta)
 }
