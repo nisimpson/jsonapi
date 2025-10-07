@@ -179,7 +179,7 @@ type Ref struct {
 // Error represents a JSON:API error object that provides detailed information
 // about problems encountered during request processing.
 type Error struct {
-	Id     string                 `json:"id,omitempty"`     // Unique identifier for this error instance
+	ID     string                 `json:"id,omitempty"`     // Unique identifier for this error instance
 	Status string                 `json:"status,omitempty"` // HTTP status code as string
 	Code   string                 `json:"code,omitempty"`   // Application-specific error code
 	Title  string                 `json:"title,omitempty"`  // Short, human-readable summary
