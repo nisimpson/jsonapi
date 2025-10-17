@@ -14,6 +14,11 @@ type Context struct {
 	ResourceType string // Type of the target resource
 	Relationship string // Name of the relationship being accessed
 	Related      bool   // Whether this is a request for related resources
+
+	// If true, then this context has been resolved by a [RequestResolver]
+	// in the request chain. Primarily used to override request resolution
+	// via [UseRequestResolver] middleware.
+	Resolved bool
 }
 
 // requestContextKey is used as a key for storing Request objects in context.Context.
@@ -109,8 +114,17 @@ type RequestResolver interface {
 // and adds this information to the request context for use by downstream handlers.
 func Handle(resolver RequestResolver, handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		request := resolver.ResolveJSONAPIRequest(r)
-		ctx := WithContext(r.Context(), request)
+		var (
+			ctx     = r.Context()
+			request = FromContext(ctx)
+		)
+		// check if resolvers upstream were executed to resolve the context.
+		if !request.Resolved {
+			// unresolved -- resolve the context using the provided resolver.
+			request = resolver.ResolveJSONAPIRequest(r)
+			request.Resolved = true
+			ctx = WithContext(r.Context(), request)
+		}
 		handler.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
