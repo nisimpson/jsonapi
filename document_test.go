@@ -122,3 +122,28 @@ func TestRelationshipData_UnmarshalJSON(t *testing.T) {
 		})
 	}
 }
+
+func TestDocumentData_MarshalJSON_EmptyIDWithType(t *testing.T) {
+	// A resource with a type but no ID (e.g., for create operations) should
+	// serialize as a resource object, not null.
+	data := DocumentData{
+		one: Resource{Type: "articles", Attributes: json.RawMessage(`{"name":"test"}`)},
+	}
+	b, err := data.MarshalJSON()
+	assert.NoError(t, err)
+	assert.NotEqual(t, "null", string(b))
+
+	var raw map[string]json.RawMessage
+	err = json.Unmarshal(b, &raw)
+	assert.NoError(t, err)
+	assert.Contains(t, raw, "type")
+	assert.Contains(t, raw, "attributes")
+}
+
+func TestDocumentData_MarshalJSON_NullWhenEmpty(t *testing.T) {
+	// A DocumentData with no ID and no type should serialize as null.
+	data := DocumentData{}
+	b, err := data.MarshalJSON()
+	assert.NoError(t, err)
+	assert.Equal(t, "null", string(b))
+}

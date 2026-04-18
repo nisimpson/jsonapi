@@ -67,7 +67,7 @@ func (d Document) UnmarshalData(target interface{}, opts ...Options) error {
 		return unmarshalOne(d.Data.one, target, &options)
 	}
 
-	if len(d.Data.many) > 0 {
+	if d.Data.isMany {
 		return unmarshalMany(d.Data.many, target, &options)
 	}
 
@@ -115,7 +115,7 @@ func unmarshalMany(many []Resource, target interface{}, options *options) error 
 
 	targetType := targetSlice.Elem()
 	targetPointer := reflect.ValueOf(target)
-	targetValue := targetPointer.Elem()
+	targetValue := reflect.MakeSlice(targetSlice, 0, len(many))
 
 	for idx, record := range many {
 		targetRecord := reflect.New(targetType)

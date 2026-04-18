@@ -61,7 +61,7 @@ func (d DocumentData) MarshalJSON() ([]byte, error) {
 		return jsonMarshal(d.many)
 	}
 
-	if d.one.ID == "" {
+	if d.one.ID == "" && d.one.Type == "" {
 		return []byte("null"), nil
 	}
 

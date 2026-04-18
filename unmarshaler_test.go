@@ -60,3 +60,19 @@ func TestDocument_UnmarshalData_Many(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, resources, 2)
 }
+
+func TestDocument_UnmarshalData_EmptyCollection(t *testing.T) {
+	// An empty collection {"data":[]} is a valid JSON:API response.
+	// It should unmarshal to an empty slice, not return io.EOF.
+	jsonData := `{"data": []}`
+
+	var doc Document
+	err := json.Unmarshal([]byte(jsonData), &doc)
+	assert.NoError(t, err)
+
+	var resources []testResource
+	err = doc.UnmarshalData(&resources)
+	assert.NoError(t, err)
+	assert.NotNil(t, resources)
+	assert.Len(t, resources, 0)
+}
