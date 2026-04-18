@@ -11,7 +11,8 @@ A comprehensive Go library for building JSON:API compliant REST APIs. This libra
 - **Complete JSON:API Support**: Resources, relationships, links, meta, errors, and includes
 - **Type-Safe Marshaling**: Struct-based resource definitions with interface-driven customization
 - **Flexible Unmarshaling**: Support for creation, updates, and relationship operations
-- **HTTP Integration**: Built-in mux with automatic request parsing and context injection
+- **HTTP Server Integration**: Built-in mux with automatic request parsing and context injection
+- **HTTP Client**: Typed client for consuming JSON:API servers with CRUD, relationships, pagination, and middleware
 - **Link Resolution**: Pluggable URL generation without server awareness in resources
 - **Validation**: Optional type validation and comprehensive error handling
 - **Performance**: Efficient marshaling with configurable include depth limits
@@ -130,6 +131,68 @@ func createArticle(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+### HTTP Client
+
+```go
+func main() {
+    // Create a JSON:API client
+    client := jsonapi.NewClient("https://api.example.com")
+
+    ctx := context.Background()
+
+    // Fetch a single resource
+    resp, err := client.Fetch(ctx, "articles", "1")
+    if err != nil {
+        // Check if it's a server error response (non-2xx)
+        var respErr *jsonapi.ResponseError
+        if errors.As(err, &respErr) {
+            log.Printf("Server returned %d", respErr.StatusCode)
+            for _, e := range respErr.Errors() {
+                log.Printf("  %s: %s", e.Title, e.Detail)
+            }
+        }
+        log.Fatal(err)
+    }
+
+    var article Article
+    resp.Unmarshal(&article)
+
+    // List a collection
+    resp, err = client.List(ctx, "articles",
+        jsonapi.WithInclude("author", "tags"),
+        jsonapi.WithFields("articles", "title", "content"),
+        jsonapi.WithSort("-created_at"),
+        jsonapi.WithPageNumber(1, 25),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    var articles []Article
+    resp.Unmarshal(&articles)
+
+    // Create a resource
+    newArticle := Article{Title: "Hello", Content: "World"}
+    resp, err = client.Create(ctx, newArticle)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Update a resource
+    article.Title = "Updated Title"
+    resp, err = client.Update(ctx, &article)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Delete a resource
+    resp, err = client.Delete(ctx, "articles", "1")
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
 ### Marshaling & Unmarshaling
 
 ```go
@@ -194,6 +257,238 @@ jsonapi.Marshal(article,
     jsonapi.WithDefaultLinks("https://api.example.com"))
 ```
 
+## HTTP Client
+
+The library includes a typed HTTP client for consuming JSON:API servers. The client reuses the same resource interfaces used on the server side, so the same struct definitions work for both producing and consuming JSON:API documents.
+
+### Creating a Client
+
+```go
+client := jsonapi.NewClient("https://api.example.com")
+```
+
+Customize the client with options:
+
+```go
+client := jsonapi.NewClient("https://api.example.com",
+    jsonapi.WithHTTPClient(&http.Client{Timeout: 10 * time.Second}),
+    jsonapi.WithURLResolver(myResolver),
+    jsonapi.WithRequestMiddleware(authMiddleware),
+    jsonapi.WithResponseMiddleware(loggingMiddleware),
+)
+```
+
+### CRUD Operations
+
+```go
+ctx := context.Background()
+
+// Fetch a single resource
+resp, err := client.Fetch(ctx, "articles", "1")
+var article Article
+resp.Unmarshal(&article)
+
+// List a collection
+resp, err := client.List(ctx, "articles")
+var articles []Article
+resp.Unmarshal(&articles)
+
+// Create a resource
+resp, err := client.Create(ctx, newArticle)
+
+// Update a resource
+resp, err := client.Update(ctx, &article)
+
+// Delete a resource
+resp, err := client.Delete(ctx, "articles", "1")
+```
+
+### Relationship Operations
+
+```go
+// Fetch relationship identifiers
+resp, err := client.FetchRef(ctx, "articles", "1", "author")
+var article Article
+resp.UnmarshalRef("author", &article)
+
+// Replace a relationship
+resp, err := client.UpdateRef(ctx, &article, "author")
+
+// Add to a to-many relationship
+resp, err := client.AddRef(ctx, &article, "tags")
+
+// Remove from a to-many relationship
+resp, err := client.RemoveRef(ctx, &article, "tags")
+
+// Fetch full related resources
+resp, err := client.FetchRelated(ctx, "articles", "1", "comments")
+var comments []Comment
+resp.Unmarshal(&comments)
+```
+
+### Query Parameters
+
+Compose query parameters as per-request options:
+
+```go
+resp, err := client.List(ctx, "articles",
+    jsonapi.WithInclude("author", "tags"),
+    jsonapi.WithFields("articles", "title", "content"),
+    jsonapi.WithFields("users", "name"),
+    jsonapi.WithSort("-created_at", "title"),
+    jsonapi.WithFilter(map[string]string{"status": "published"}),
+)
+```
+
+Pagination options:
+
+```go
+// Number-based pagination: ?page[number]=1&page[size]=25
+jsonapi.WithPageNumber(1, 25)
+
+// Cursor-based pagination: ?page[after]=abc123&page[size]=25
+jsonapi.WithPageCursor("abc123", 25)
+
+// Custom page parameters: ?page[offset]=10&page[limit]=25
+jsonapi.WithPageParams(map[string]string{"offset": "10", "limit": "25"})
+```
+
+### Page Iterator
+
+Traverse paginated collections by following `next` links automatically:
+
+```go
+resp, err := client.List(ctx, "articles", jsonapi.WithPageNumber(1, 25))
+if err != nil {
+    log.Fatal(err)
+}
+
+// Process the first page
+var articles []Article
+resp.Unmarshal(&articles)
+process(articles)
+
+// Iterate through remaining pages
+iter := client.Pages(resp)
+for iter.Next(ctx) {
+    iter.Items(&articles)
+    process(articles)
+}
+if err := iter.Err(); err != nil {
+    log.Fatal(err)
+}
+```
+
+### Unmarshal Included Resources
+
+Extract included resources by type from a response:
+
+```go
+resp, err := client.Fetch(ctx, "articles", "1",
+    jsonapi.WithInclude("author", "tags"),
+)
+
+var article Article
+resp.Unmarshal(&article)
+
+var author []User
+resp.UnmarshalIncluded("users", &author)
+
+var tags []Tag
+resp.UnmarshalIncluded("tags", &tags)
+```
+
+### Response Access
+
+The `Response` type provides access to the full JSON:API document:
+
+```go
+resp.StatusCode          // HTTP status code
+resp.Header              // HTTP response headers
+resp.Document()          // Full *Document
+resp.Links()             // Top-level links
+resp.Meta()              // Top-level meta
+resp.Errors()            // JSON:API error objects
+resp.HasErrors()         // true if errors are present
+```
+
+### Error Handling
+
+All non-2xx HTTP responses return a `*ResponseError` as the error value (with a `nil` response). Use `errors.As` to access the response details:
+
+```go
+resp, err := client.Fetch(ctx, "articles", "999")
+if err != nil {
+    var respErr *jsonapi.ResponseError
+    if errors.As(err, &respErr) {
+        fmt.Println(respErr.StatusCode) // e.g. 404
+        for _, e := range respErr.Errors() {
+            fmt.Println(e.Title, e.Detail)
+        }
+    }
+    return err
+}
+
+// resp is guaranteed non-nil here (2xx response)
+var article Article
+resp.Unmarshal(&article)
+```
+
+`ResponseError` embeds `*Response`, so all the same accessors (`StatusCode`, `Header`, `HasErrors()`, `Errors()`, `Document()`) are available on the error value. Network errors, context cancellation, and marshal failures return plain errors that are not `*ResponseError`.
+
+### Custom URL Resolver
+
+Implement `URLResolver` to work with servers that use non-standard URL patterns:
+
+```go
+type CustomResolver struct {
+    BaseURL string
+}
+
+func (r CustomResolver) ResolveResourceURL(resourceType, id string) string {
+    return r.BaseURL + "/api/v2/" + resourceType + "/" + id
+}
+
+func (r CustomResolver) ResolveCollectionURL(resourceType string) string {
+    return r.BaseURL + "/api/v2/" + resourceType
+}
+
+func (r CustomResolver) ResolveRelationshipURL(resourceType, id, relationship string) string {
+    return r.BaseURL + "/api/v2/" + resourceType + "/" + id + "/links/" + relationship
+}
+
+func (r CustomResolver) ResolveRelatedURL(resourceType, id, relationship string) string {
+    return r.BaseURL + "/api/v2/" + resourceType + "/" + id + "/" + relationship
+}
+
+client := jsonapi.NewClient("", jsonapi.WithURLResolver(CustomResolver{
+    BaseURL: "https://api.example.com",
+}))
+```
+
+### Request and Response Middleware
+
+Add cross-cutting concerns like authentication and logging:
+
+```go
+// Request middleware: add an auth header to every request
+authMiddleware := func(r *http.Request) (*http.Request, error) {
+    r.Header.Set("Authorization", "Bearer "+token)
+    return r, nil
+}
+
+// Response middleware: log response status
+logMiddleware := func(r *http.Response) (*http.Response, error) {
+    log.Printf("%s %s → %d", r.Request.Method, r.Request.URL, r.StatusCode)
+    return r, nil
+}
+
+client := jsonapi.NewClient("https://api.example.com",
+    jsonapi.WithRequestMiddleware(authMiddleware),
+    jsonapi.WithResponseMiddleware(logMiddleware),
+)
+```
+
 ## API Reference
 
 ### Core Types
@@ -212,13 +507,43 @@ jsonapi.Marshal(article,
 - `WithMaxIncludeDepth(depth)` - Limit relationship inclusion
 - `WithTypeValidation()` - Enable type validation
 - `WithError(status, err)` - Add errors to response
+- `WithInclude(relationships...)` - Include related resources in client requests
+- `WithFields(resourceType, fields...)` - Sparse fieldsets for client requests
+- `WithSort(fields...)` - Sort fields for client requests
+- `WithPageNumber(number, size)` - Number-based pagination
+- `WithPageCursor(cursor, size)` - Cursor-based pagination
+- `WithPageParams(params)` - Custom page parameters
+- `WithFilter(params)` - Filter parameters
 
-### HTTP Utilities
+### HTTP Server Utilities
 
 - `DefaultServeMux(handlers)` - Create JSON:API HTTP multiplexer with resource handlers
 - `FromContext(ctx)` - Extract request info from context
 - `Write(w, status, resource, opts...)` - Write JSON:API response
 - `WriteErrors(w, status, errors...)` - Write error response
+
+### HTTP Client
+
+- `NewClient(baseURL, opts...)` - Create a JSON:API HTTP client
+- `WithHTTPClient(hc)` - Set a custom `net/http.Client`
+- `WithURLResolver(r)` - Set a custom URL resolver
+- `WithRequestMiddleware(m...)` - Add request middleware
+- `WithResponseMiddleware(m...)` - Add response middleware
+- `Client.Fetch(ctx, type, id, opts...)` - GET a single resource
+- `Client.List(ctx, type, opts...)` - GET a resource collection
+- `Client.Create(ctx, resource, opts...)` - POST a new resource
+- `Client.Update(ctx, resource, opts...)` - PATCH an existing resource
+- `Client.Delete(ctx, type, id, opts...)` - DELETE a resource
+- `Client.FetchRef(ctx, type, id, ref, opts...)` - GET relationship data
+- `Client.UpdateRef(ctx, resource, ref, opts...)` - PATCH relationship data
+- `Client.AddRef(ctx, resource, ref, opts...)` - POST to a to-many relationship
+- `Client.RemoveRef(ctx, resource, ref, opts...)` - DELETE from a to-many relationship
+- `Client.FetchRelated(ctx, type, id, ref, opts...)` - GET related resources
+- `Client.Pages(response)` - Create a page iterator
+- `Response.Unmarshal(target, opts...)` - Unmarshal primary data
+- `Response.UnmarshalRef(name, target, opts...)` - Unmarshal relationship data
+- `Response.UnmarshalIncluded(type, target, opts...)` - Unmarshal included resources by type
+- `ResponseError` - Error type for non-2xx responses, embeds `*Response`; use `errors.As` to extract from `error`
 
 ## Migration from v1
 

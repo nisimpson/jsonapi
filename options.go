@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
+	"strings"
 )
 
 // Options defines the interface for configuration options that can be applied
@@ -24,6 +27,18 @@ type options struct {
 	maxIncludeDepth int                     // Maximum depth for including related resources
 	validateType    bool                    // Whether to validate resource types during unmarshaling
 	linkResolver    map[string]LinkResolver // Map of link resolvers by key name for generating URLs
+
+	// Query parameter fields used by the client layer for building request URLs.
+	queryInclude    []string            // include=author,tags
+	queryFields     map[string][]string // fields[articles]=title,content
+	querySort       []string            // sort=-created_at,title
+	queryPageNumber *[2]int             // page[number]=X&page[size]=Y (from WithPageNumber)
+	queryPageCursor *struct {           // page[after]=X&page[size]=Y (from WithPageCursor)
+		cursor string
+		size   int
+	}
+	queryPageParams map[string]string // page[key]=value (from WithPageParams)
+	queryFilter     map[string]string // filter[key]=value
 }
 
 // fromOptionsOverride creates an [Options] function that copies all settings from the base options.
@@ -47,6 +62,9 @@ func applyOptions(opts []Options) options {
 		topMeta:         make(map[string]interface{}),
 		includes:        make(map[string]*Resource),
 		linkResolver:    make(map[string]LinkResolver),
+		queryFields:     make(map[string][]string),
+		queryPageParams: make(map[string]string),
+		queryFilter:     make(map[string]string),
 		maxIncludeDepth: math.MaxInt,
 		validateType:    false,
 	}
@@ -271,4 +289,181 @@ func WithDefaultLinks(baseURL string) Options {
 		WithLinkResolver("self", resolver),
 		WithLinkResolver("related", resolver),
 	)
+}
+
+// WithInclude specifies related resources to include in the response.
+// The relationships are joined as a comma-separated list in the `include` query parameter.
+//
+// Example:
+//
+//	client.List(ctx, "articles", jsonapi.WithInclude("author", "tags"))
+//	// produces: ?include=author,tags
+func WithInclude(relationships ...string) Options {
+	return optionsFunc(func(opts *options) {
+		opts.queryInclude = append(opts.queryInclude, relationships...)
+	})
+}
+
+// WithFields specifies sparse fieldsets for a resource type.
+// The fields are joined as a comma-separated list in the `fields[{type}]` query parameter.
+//
+// Example:
+//
+//	client.List(ctx, "articles", jsonapi.WithFields("articles", "title", "content"))
+//	// produces: ?fields[articles]=title,content
+func WithFields(resourceType string, fields ...string) Options {
+	return optionsFunc(func(opts *options) {
+		opts.queryFields[resourceType] = append(opts.queryFields[resourceType], fields...)
+	})
+}
+
+// WithSort specifies sort fields for the request.
+// Prefix a field with "-" for descending order.
+// The fields are joined as a comma-separated list in the `sort` query parameter.
+//
+// Example:
+//
+//	client.List(ctx, "articles", jsonapi.WithSort("-created_at", "title"))
+//	// produces: ?sort=-created_at,title
+func WithSort(fields ...string) Options {
+	return optionsFunc(func(opts *options) {
+		opts.querySort = append(opts.querySort, fields...)
+	})
+}
+
+// WithPageNumber specifies offset/number-based pagination.
+// Produces `page[number]=X&page[size]=Y` in the request URL query string.
+//
+// Example:
+//
+//	client.List(ctx, "articles", jsonapi.WithPageNumber(1, 25))
+//	// produces: ?page[number]=1&page[size]=25
+func WithPageNumber(number, size int) Options {
+	return optionsFunc(func(opts *options) {
+		opts.queryPageNumber = &[2]int{number, size}
+	})
+}
+
+// WithPageCursor specifies cursor-based pagination.
+// Produces `page[after]=X&page[size]=Y` in the request URL query string.
+//
+// Example:
+//
+//	client.List(ctx, "articles", jsonapi.WithPageCursor("abc123", 25))
+//	// produces: ?page[after]=abc123&page[size]=25
+func WithPageCursor(cursor string, size int) Options {
+	return optionsFunc(func(opts *options) {
+		opts.queryPageCursor = &struct {
+			cursor string
+			size   int
+		}{cursor: cursor, size: size}
+	})
+}
+
+// WithPageParams specifies generic page parameters as key-value pairs.
+// Produces `page[key]=value` for each entry in the request URL query string.
+// Use as an escape hatch for custom pagination strategies not covered by
+// [WithPageNumber] or [WithPageCursor].
+//
+// Example:
+//
+//	client.List(ctx, "articles", jsonapi.WithPageParams(map[string]string{"offset": "10", "limit": "25"}))
+//	// produces: ?page[offset]=10&page[limit]=25
+func WithPageParams(params map[string]string) Options {
+	return optionsFunc(func(opts *options) {
+		for k, v := range params {
+			opts.queryPageParams[k] = v
+		}
+	})
+}
+
+// WithFilter specifies filter parameters as key-value pairs.
+// Produces `filter[key]=value` for each entry in the request URL query string.
+//
+// Example:
+//
+//	client.List(ctx, "articles", jsonapi.WithFilter(map[string]string{"status": "published"}))
+//	// produces: ?filter[status]=published
+func WithFilter(params map[string]string) Options {
+	return optionsFunc(func(opts *options) {
+		for k, v := range params {
+			opts.queryFilter[k] = v
+		}
+	})
+}
+
+// buildQueryParams encodes all query parameter fields into url.Values.
+// It produces JSON:API compliant query parameters:
+//   - include=author,tags (comma-separated)
+//   - fields[type]=field1,field2 (comma-separated per type)
+//   - sort=-created_at,title (comma-separated)
+//   - page[number]=X&page[size]=Y (from WithPageNumber)
+//   - page[after]=X&page[size]=Y (from WithPageCursor)
+//   - page[key]=value (from WithPageParams)
+//   - filter[key]=value (from WithFilter)
+func (o *options) buildQueryParams() url.Values {
+	params := url.Values{}
+
+	// Encode include as comma-separated list.
+	if len(o.queryInclude) > 0 {
+		params.Set("include", strings.Join(o.queryInclude, ","))
+	}
+
+	// Encode fields[type] as comma-separated list per type.
+	// Sort map keys for deterministic output.
+	if len(o.queryFields) > 0 {
+		keys := make([]string, 0, len(o.queryFields))
+		for k := range o.queryFields {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			params.Set(fmt.Sprintf("fields[%s]", k), strings.Join(o.queryFields[k], ","))
+		}
+	}
+
+	// Encode sort as comma-separated list.
+	if len(o.querySort) > 0 {
+		params.Set("sort", strings.Join(o.querySort, ","))
+	}
+
+	// Encode page[number] and page[size] from WithPageNumber.
+	if o.queryPageNumber != nil {
+		params.Set("page[number]", strconv.Itoa(o.queryPageNumber[0]))
+		params.Set("page[size]", strconv.Itoa(o.queryPageNumber[1]))
+	}
+
+	// Encode page[after] and page[size] from WithPageCursor.
+	if o.queryPageCursor != nil {
+		params.Set("page[after]", o.queryPageCursor.cursor)
+		params.Set("page[size]", strconv.Itoa(o.queryPageCursor.size))
+	}
+
+	// Encode page[key]=value from WithPageParams.
+	// Sort map keys for deterministic output.
+	if len(o.queryPageParams) > 0 {
+		keys := make([]string, 0, len(o.queryPageParams))
+		for k := range o.queryPageParams {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			params.Set(fmt.Sprintf("page[%s]", k), o.queryPageParams[k])
+		}
+	}
+
+	// Encode filter[key]=value from WithFilter.
+	// Sort map keys for deterministic output.
+	if len(o.queryFilter) > 0 {
+		keys := make([]string, 0, len(o.queryFilter))
+		for k := range o.queryFilter {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			params.Set(fmt.Sprintf("filter[%s]", k), o.queryFilter[k])
+		}
+	}
+
+	return params
 }
