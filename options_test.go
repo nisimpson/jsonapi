@@ -190,7 +190,7 @@ func TestBuildQueryParams_PageParams(t *testing.T) {
 }
 
 func TestBuildQueryParams_Filter(t *testing.T) {
-	opts := applyOptions([]Options{WithFilter(map[string]string{"status": "published", "author": "john"})})
+	opts := applyOptions([]Options{WithFilter("status", "published"), WithFilter("author", "john")})
 	params := opts.buildQueryParams()
 	assert.Equal(t, "published", params.Get("filter[status]"))
 	assert.Equal(t, "john", params.Get("filter[author]"))
@@ -202,7 +202,7 @@ func TestBuildQueryParams_Combined(t *testing.T) {
 		WithFields("articles", "title", "content"),
 		WithSort("-created_at"),
 		WithPageNumber(1, 25),
-		WithFilter(map[string]string{"status": "published"}),
+		WithFilter("status", "published"),
 	})
 	params := opts.buildQueryParams()
 	assert.Equal(t, "author,tags", params.Get("include"))
@@ -221,6 +221,37 @@ func TestBuildQueryParams_NilPageFields(t *testing.T) {
 	params := opts.buildQueryParams()
 	assert.Empty(t, params.Get("page[number]"))
 	assert.Empty(t, params.Get("page[after]"))
+}
+
+func TestBuildQueryParams_QueryParam(t *testing.T) {
+	opts := applyOptions([]Options{
+		WithQueryParam("search", "golang"),
+		WithQueryParam("version", "2"),
+	})
+	params := opts.buildQueryParams()
+	assert.Equal(t, "golang", params.Get("search"))
+	assert.Equal(t, "2", params.Get("version"))
+}
+
+func TestBuildQueryParams_QueryParamMultipleValues(t *testing.T) {
+	opts := applyOptions([]Options{
+		WithQueryParam("tag", "go"),
+		WithQueryParam("tag", "jsonapi"),
+	})
+	params := opts.buildQueryParams()
+	assert.Equal(t, []string{"go", "jsonapi"}, params["tag"])
+}
+
+func TestBuildQueryParams_QueryParamWithOtherOptions(t *testing.T) {
+	opts := applyOptions([]Options{
+		WithInclude("author"),
+		WithFilter("status", "published"),
+		WithQueryParam("search", "test"),
+	})
+	params := opts.buildQueryParams()
+	assert.Equal(t, "author", params.Get("include"))
+	assert.Equal(t, "published", params.Get("filter[status]"))
+	assert.Equal(t, "test", params.Get("search"))
 }
 
 // Feature: jsonapi-http-client, Property 6: Query parameters are correctly encoded
@@ -394,13 +425,11 @@ func TestProperty_QueryParametersCorrectlyEncoded(t *testing.T) {
 		}
 
 		if len(input.FilterKeys) > 0 {
-			filterParams := make(map[string]string)
 			for i, k := range input.FilterKeys {
 				if i < len(input.FilterValues) {
-					filterParams[k] = input.FilterValues[i]
+					opts = append(opts, WithFilter(k, input.FilterValues[i]))
 				}
 			}
-			opts = append(opts, WithFilter(filterParams))
 		}
 
 		applied := applyOptions(opts)

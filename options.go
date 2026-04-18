@@ -37,8 +37,9 @@ type options struct {
 		cursor string
 		size   int
 	}
-	queryPageParams map[string]string // page[key]=value (from WithPageParams)
-	queryFilter     map[string]string // filter[key]=value
+	queryPageParams map[string]string   // page[key]=value (from WithPageParams)
+	queryFilter     map[string]string   // filter[key]=value
+	queryParams     map[string][]string // raw query parameters (from WithQueryParam)
 }
 
 // fromOptionsOverride creates an [Options] function that copies all settings from the base options.
@@ -65,6 +66,7 @@ func applyOptions(opts []Options) options {
 		queryFields:     make(map[string][]string),
 		queryPageParams: make(map[string]string),
 		queryFilter:     make(map[string]string),
+		queryParams:     make(map[string][]string),
 		maxIncludeDepth: math.MaxInt,
 		validateType:    false,
 	}
@@ -377,18 +379,39 @@ func WithPageParams(params map[string]string) Options {
 	})
 }
 
-// WithFilter specifies filter parameters as key-value pairs.
-// Produces `filter[key]=value` for each entry in the request URL query string.
+// WithFilter specifies a filter parameter as a key-value pair.
+// Produces `filter[key]=value` in the request URL query string.
 //
 // Example:
 //
-//	client.List(ctx, "articles", jsonapi.WithFilter(map[string]string{"status": "published"}))
-//	// produces: ?filter[status]=published
-func WithFilter(params map[string]string) Options {
+//	client.List(ctx, "articles",
+//	    jsonapi.WithFilter("status", "published"),
+//	    jsonapi.WithFilter("author", "john"),
+//	)
+//	// produces: ?filter[status]=published&filter[author]=john
+func WithFilter(key, value string) Options {
 	return optionsFunc(func(opts *options) {
-		for k, v := range params {
-			opts.queryFilter[k] = v
-		}
+		opts.queryFilter[key] = value
+	})
+}
+
+// WithQueryParam adds a raw query parameter to the request URL.
+// The key and value are used as-is without any wrapping or formatting.
+// Multiple calls with the same key will append values.
+//
+// Use this for non-standard or vendor-specific query parameters that don't
+// fit the JSON:API conventions covered by WithInclude, WithFields, etc.
+//
+// Example:
+//
+//	client.List(ctx, "articles",
+//	    jsonapi.WithQueryParam("search", "golang"),
+//	    jsonapi.WithQueryParam("version", "2"),
+//	)
+//	// produces: ?search=golang&version=2
+func WithQueryParam(key, value string) Options {
+	return optionsFunc(func(opts *options) {
+		opts.queryParams[key] = append(opts.queryParams[key], value)
 	})
 }
 
@@ -401,6 +424,7 @@ func WithFilter(params map[string]string) Options {
 //   - page[after]=X&page[size]=Y (from WithPageCursor)
 //   - page[key]=value (from WithPageParams)
 //   - filter[key]=value (from WithFilter)
+//   - key=value (from WithQueryParam)
 func (o *options) buildQueryParams() url.Values {
 	params := url.Values{}
 
@@ -462,6 +486,21 @@ func (o *options) buildQueryParams() url.Values {
 		sort.Strings(keys)
 		for _, k := range keys {
 			params.Set(fmt.Sprintf("filter[%s]", k), o.queryFilter[k])
+		}
+	}
+
+	// Encode raw query parameters from WithQueryParam.
+	// Sort map keys for deterministic output.
+	if len(o.queryParams) > 0 {
+		keys := make([]string, 0, len(o.queryParams))
+		for k := range o.queryParams {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			for _, v := range o.queryParams[k] {
+				params.Add(k, v)
+			}
 		}
 	}
 

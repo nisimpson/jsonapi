@@ -336,7 +336,7 @@ resp, err := client.List(ctx, "articles",
     jsonapi.WithFields("articles", "title", "content"),
     jsonapi.WithFields("users", "name"),
     jsonapi.WithSort("-created_at", "title"),
-    jsonapi.WithFilter(map[string]string{"status": "published"}),
+    jsonapi.WithFilter("status", "published"),
 )
 ```
 
@@ -351,6 +351,16 @@ jsonapi.WithPageCursor("abc123", 25)
 
 // Custom page parameters: ?page[offset]=10&page[limit]=25
 jsonapi.WithPageParams(map[string]string{"offset": "10", "limit": "25"})
+```
+
+Raw query parameters for non-standard or vendor-specific needs:
+
+```go
+resp, err := client.List(ctx, "articles",
+    jsonapi.WithQueryParam("search", "golang"),
+    jsonapi.WithQueryParam("version", "2"),
+)
+// produces: ?search=golang&version=2
 ```
 
 ### Page Iterator
@@ -513,7 +523,8 @@ client := jsonapi.NewClient("https://api.example.com",
 - `WithPageNumber(number, size)` - Number-based pagination
 - `WithPageCursor(cursor, size)` - Cursor-based pagination
 - `WithPageParams(params)` - Custom page parameters
-- `WithFilter(params)` - Filter parameters
+- `WithFilter(key, value)` - Filter parameters
+- `WithQueryParam(key, value)` - Raw query parameters
 
 ### HTTP Server Utilities
 
