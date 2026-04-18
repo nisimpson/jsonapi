@@ -347,7 +347,7 @@ Pagination options:
 jsonapi.WithPageNumber(1, 25)
 
 // Cursor-based pagination: ?page[after]=abc123&page[size]=25
-jsonapi.WithPageCursor("abc123", 25)
+jsonapi.WithPageCursor("after", "abc123", 25)
 
 // Custom page parameters: ?page[offset]=10&page[limit]=25
 jsonapi.WithPageParams(map[string]string{"offset": "10", "limit": "25"})
@@ -521,7 +521,7 @@ client := jsonapi.NewClient("https://api.example.com",
 - `WithFields(resourceType, fields...)` - Sparse fieldsets for client requests
 - `WithSort(fields...)` - Sort fields for client requests
 - `WithPageNumber(number, size)` - Number-based pagination
-- `WithPageCursor(cursor, size)` - Cursor-based pagination
+- `WithPageCursor(label, cursor, size)` - Cursor-based pagination
 - `WithPageParams(params)` - Custom page parameters
 - `WithFilter(key, value)` - Filter parameters
 - `WithQueryParam(key, value)` - Raw query parameters

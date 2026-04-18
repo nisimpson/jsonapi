@@ -33,7 +33,8 @@ type options struct {
 	queryFields     map[string][]string // fields[articles]=title,content
 	querySort       []string            // sort=-created_at,title
 	queryPageNumber *[2]int             // page[number]=X&page[size]=Y (from WithPageNumber)
-	queryPageCursor *struct {           // page[after]=X&page[size]=Y (from WithPageCursor)
+	queryPageCursor *struct {           // page[{label}]=X&page[size]=Y (from WithPageCursor)
+		label  string
 		cursor string
 		size   int
 	}
@@ -347,18 +348,20 @@ func WithPageNumber(number, size int) Options {
 }
 
 // WithPageCursor specifies cursor-based pagination.
-// Produces `page[after]=X&page[size]=Y` in the request URL query string.
+// The label parameter controls the cursor key name (e.g., "after", "cursor", "next").
+// Produces `page[{label}]=X&page[size]=Y` in the request URL query string.
 //
 // Example:
 //
-//	client.List(ctx, "articles", jsonapi.WithPageCursor("abc123", 25))
+//	client.List(ctx, "articles", jsonapi.WithPageCursor("after", "abc123", 25))
 //	// produces: ?page[after]=abc123&page[size]=25
-func WithPageCursor(cursor string, size int) Options {
+func WithPageCursor(label, cursor string, size int) Options {
 	return optionsFunc(func(opts *options) {
 		opts.queryPageCursor = &struct {
+			label  string
 			cursor string
 			size   int
-		}{cursor: cursor, size: size}
+		}{label: label, cursor: cursor, size: size}
 	})
 }
 
@@ -421,7 +424,7 @@ func WithQueryParam(key, value string) Options {
 //   - fields[type]=field1,field2 (comma-separated per type)
 //   - sort=-created_at,title (comma-separated)
 //   - page[number]=X&page[size]=Y (from WithPageNumber)
-//   - page[after]=X&page[size]=Y (from WithPageCursor)
+//   - page[{label}]=X&page[size]=Y (from WithPageCursor)
 //   - page[key]=value (from WithPageParams)
 //   - filter[key]=value (from WithFilter)
 //   - key=value (from WithQueryParam)
@@ -457,9 +460,9 @@ func (o *options) buildQueryParams() url.Values {
 		params.Set("page[size]", strconv.Itoa(o.queryPageNumber[1]))
 	}
 
-	// Encode page[after] and page[size] from WithPageCursor.
+	// Encode page[{label}] and page[size] from WithPageCursor.
 	if o.queryPageCursor != nil {
-		params.Set("page[after]", o.queryPageCursor.cursor)
+		params.Set(fmt.Sprintf("page[%s]", o.queryPageCursor.label), o.queryPageCursor.cursor)
 		params.Set("page[size]", strconv.Itoa(o.queryPageCursor.size))
 	}
 

@@ -176,10 +176,18 @@ func TestBuildQueryParams_PageNumber(t *testing.T) {
 }
 
 func TestBuildQueryParams_PageCursor(t *testing.T) {
-	opts := applyOptions([]Options{WithPageCursor("abc123", 10)})
+	opts := applyOptions([]Options{WithPageCursor("after", "abc123", 10)})
 	params := opts.buildQueryParams()
 	assert.Equal(t, "abc123", params.Get("page[after]"))
 	assert.Equal(t, "10", params.Get("page[size]"))
+}
+
+func TestBuildQueryParams_PageCursorCustomLabel(t *testing.T) {
+	opts := applyOptions([]Options{WithPageCursor("cursor", "xyz789", 50)})
+	params := opts.buildQueryParams()
+	assert.Equal(t, "xyz789", params.Get("page[cursor]"))
+	assert.Equal(t, "50", params.Get("page[size]"))
+	assert.Empty(t, params.Get("page[after]"))
 }
 
 func TestBuildQueryParams_PageParams(t *testing.T) {
@@ -410,7 +418,7 @@ func TestProperty_QueryParametersCorrectlyEncoded(t *testing.T) {
 		if input.UsePageNum && !input.UseCursor {
 			opts = append(opts, WithPageNumber(input.PageNumber, input.PageSize))
 		} else if input.UseCursor && !input.UsePageNum {
-			opts = append(opts, WithPageCursor(input.Cursor, input.CursorSize))
+			opts = append(opts, WithPageCursor("after", input.Cursor, input.CursorSize))
 		}
 
 		// Add page params (only when not using page-number or cursor to avoid conflicts).
